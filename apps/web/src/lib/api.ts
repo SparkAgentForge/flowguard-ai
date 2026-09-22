@@ -99,6 +99,36 @@ export type ExceptionCase = {
   reworkTask: ReworkTask | null
 }
 
+export type Report = {
+  id: string
+  workOrderId: string
+  workOrderCode: string
+  version: number
+  content: {
+    schemaVersion: string
+    outcome: string
+    sop: { code: string | null; name: string | null; version: string | null; sourceDocumentSha256: string | null }
+    videos: { id: string; filename: string; sha256: string; kind: string }[]
+    audits: { id: string; decision: string; provider: string; model: string; promptVersion: string; summary: string; findings: AuditFinding[] }[]
+    humanDecision: { status: string; reason: string | null; reviewedBy: string | null } | null
+    rework: { taskId: string; assigneeId: string; instructions: string; status: string; reviewedBy: string | null; reviewNotes: string | null } | null
+  }
+  pdfSha256: string
+  archivedAt: string
+  createdAt: string
+}
+
+export type ReportSummary = {
+  id: string
+  workOrderId: string
+  workOrderCode: string
+  productCode: string
+  workOrderStatus: string
+  version: number
+  outcome: string
+  archivedAt: string
+}
+
 type DocumentRecord = { id: string }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -176,6 +206,14 @@ export function reviewRework(taskId: string, actorId: string, videoId: string, n
   return request(`/rework-tasks/${taskId}/review`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actorId, videoId, notes }),
   })
+}
+
+export function listReports(): Promise<ReportSummary[]> {
+  return request<ReportSummary[]>('/reports')
+}
+
+export function createOrReadReport(workOrderId: string): Promise<Report> {
+  return request<Report>(`/reports/${workOrderId}`)
 }
 
 export function updateSop(version: SopVersion, actorId: string): Promise<SopVersion> {

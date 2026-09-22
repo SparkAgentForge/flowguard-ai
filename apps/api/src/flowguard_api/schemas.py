@@ -247,3 +247,25 @@ class NotificationRead(ApiModel):
     message: str
     read_at: datetime | None
     created_at: datetime
+
+
+class ReportRead(ApiModel):
+    id: str
+    work_order_id: str
+    work_order_code: str
+    version: int
+    content: dict
+    pdf_sha256: str
+    archived_at: datetime
+    created_at: datetime
+
+
+class ReportSummary(ApiModel):
+    id: str
+    work_order_id: str
+    work_order_code: str
+    product_code: str
+    work_order_status: WorkOrderStatus
+    version: int
+    outcome: str
+    archived_at: datetime

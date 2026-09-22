@@ -275,3 +275,17 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(Text)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    __table_args__ = (UniqueConstraint("work_order_id", "version", name="uq_report_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+    pdf_storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+    pdf_sha256: Mapped[str] = mapped_column(String(64))
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
