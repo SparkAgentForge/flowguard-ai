@@ -45,15 +45,17 @@ class MockInferenceAdapter:
     def analyze(self, filename: str, video: bytes, steps: list[SopStep]) -> InferenceResult:
         if not video:
             raise VideoInferenceError("视频内容为空")
+        scenario = filename.lower()
         findings = []
         for index, step in enumerate(steps):
-            detected = index != 1
+            detected = "normal" in scenario or "rework" in scenario or index != 1
+            confidence = 41 if "occluded" in scenario and index == 1 else (94 if detected else 88)
             start = index * 9 if detected else None
             findings.append(
                 InferenceFinding(
                     step_code=step.code,
                     detected=detected,
-                    confidence=94 if detected else 88,
+                    confidence=confidence,
                     start_seconds=start,
                     end_seconds=start + 7 if start is not None else None,
                     evidence=(
@@ -64,11 +66,18 @@ class MockInferenceAdapter:
                     frame_timestamps=[start, start + 3] if start is not None else [9, 12, 15],
                 )
             )
+        overall_pass = all(item.detected for item in findings)
+        if overall_pass:
+            summary = "所有必需步骤均已观察到"
+        elif "occluded" in scenario:
+            summary = "关键步骤画面受遮挡，需要人工复核"
+        else:
+            summary = "第 2 步未观察到，请核对视频证据"
         return InferenceResult(
             provider="mock",
             model_name="deterministic-demo",
-            overall_pass=all(item.detected for item in findings),
-            summary="第 2 步漏了，这是证据" if len(findings) > 1 else "视频检测完成",
+            overall_pass=overall_pass,
+            summary=summary,
             findings=findings,
             raw_response={"filename": filename, "mode": "mock"},
         )

@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import { AppShell } from './components/AppShell'
 import { DashboardPage } from './pages/DashboardPage'
+import { ExceptionsPage } from './pages/ExceptionsPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SopWorkspacePage } from './pages/SopWorkspacePage'
 import { WorkOrdersPage } from './pages/WorkOrdersPage'
@@ -15,7 +16,7 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="sops" element={<SopWorkspacePage />} />
           <Route path="work-orders" element={<WorkOrdersPage />} />
-          <Route path="exceptions" element={<PlaceholderPage section="异常处置" />} />
+          <Route path="exceptions" element={<ExceptionsPage />} />
           <Route path="reports" element={<PlaceholderPage section="证据归档" />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

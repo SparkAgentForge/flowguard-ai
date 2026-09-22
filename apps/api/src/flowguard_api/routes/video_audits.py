@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session, selectinload
 from flowguard_api.config import get_settings
 from flowguard_api.database import get_session
 from flowguard_api.models import (
-    AuditFinding,
-    SopVersion,
+    AuditDecision,
+    ExceptionCase,
+    ExceptionStatus,
     VideoAsset,
     VideoAudit,
     VideoAuditStatus,
@@ -19,10 +20,8 @@ from flowguard_api.models import (
     WorkOrderStatus,
 )
 from flowguard_api.schemas import VideoAuditRead, VideoAuditRequest, VideoRead
-from flowguard_api.services.video_inference import (
-    VideoInferenceError,
-    get_video_inference_adapter,
-)
+from flowguard_api.services.video_audit import InvalidVideoAudit, execute_video_audit
+from flowguard_api.services.video_inference import VideoInferenceError
 from flowguard_api.services.work_order_state import transition_work_order
 from flowguard_api.storage import FileStorage, get_file_storage, sanitize_filename
 
@@ -125,15 +124,6 @@ def inspect_video(
     )
     if existing is not None and existing.status == VideoAuditStatus.COMPLETED:
         return _get_audit_detail(session, existing.id)
-    version = session.scalar(
-        select(SopVersion)
-        .options(selectinload(SopVersion.steps))
-        .where(SopVersion.id == work_order.sop_version_id)
-    )
-    if version is None:
-        raise HTTPException(status_code=409, detail="工作单关联的 SOP 版本不存在")
-    if version.status.value != "PUBLISHED":
-        raise HTTPException(status_code=409, detail="只有已发布的 SOP 才能用于视频检测")
     if work_order.status == WorkOrderStatus.CREATED:
         transition_work_order(
             session, work_order, WorkOrderStatus.INSPECTING, payload.actor_id, "开始视频检测"
@@ -141,17 +131,15 @@ def inspect_video(
     elif work_order.status != WorkOrderStatus.INSPECTING:
         raise HTTPException(status_code=409, detail="当前工作单状态不允许重新检测")
 
-    adapter = get_video_inference_adapter()
     try:
-        result = adapter.analyze(
-            video.filename, storage.get(video.storage_key), list(version.steps)
-        )
-    except VideoInferenceError as error:
+        audit = execute_video_audit(session, work_order, video, storage)
+    except (InvalidVideoAudit, VideoInferenceError) as error:
         audit = VideoAudit(
             work_order_id=work_order_id,
             video_id=video.id,
             status=VideoAuditStatus.FAILED,
-            provider=getattr(adapter, "settings", None) and "stepfun" or "mock",
+            decision=AuditDecision.VIOLATION,
+            provider=get_settings().inference_provider,
             model_name="unknown",
             overall_pass=False,
             summary=str(error),
@@ -161,42 +149,40 @@ def inspect_video(
         session.commit()
         raise HTTPException(status_code=422, detail=str(error)) from error
 
-    target_status = (
-        WorkOrderStatus.VERIFIED
-        if result.overall_pass
-        else WorkOrderStatus.EXCEPTION_PENDING
-    )
-    transition_work_order(session, work_order, target_status, payload.actor_id, result.summary)
-    audit = VideoAudit(
-        work_order_id=work_order_id,
-        video_id=video.id,
-        status=VideoAuditStatus.COMPLETED,
-        provider=result.provider,
-        model_name=result.model_name,
-        overall_pass=result.overall_pass,
-        summary=result.summary,
-        raw_response=result.raw_response,
-    )
-    session.add(audit)
-    session.flush()
-    steps_by_code = {step.code: step for step in version.steps}
-    for finding in result.findings:
-        step = steps_by_code.get(finding.step_code)
-        if step is None:
-            session.rollback()
-            raise HTTPException(status_code=422, detail=f"推理结果包含未知步骤 {finding.step_code}")
+    if audit.decision == AuditDecision.PASS:
+        transition_work_order(
+            session, work_order, WorkOrderStatus.VERIFIED, payload.actor_id, audit.summary
+        )
+    else:
+        transition_work_order(
+            session,
+            work_order,
+            WorkOrderStatus.EXCEPTION_PENDING,
+            payload.actor_id,
+            audit.summary,
+        )
+        exception_status = ExceptionStatus.PENDING
+        if audit.decision == AuditDecision.INSUFFICIENT_EVIDENCE:
+            transition_work_order(
+                session,
+                work_order,
+                WorkOrderStatus.MANUAL_REVIEW,
+                payload.actor_id,
+                "关键步骤证据不足",
+            )
+            exception_status = ExceptionStatus.MANUAL_REVIEW
+        missing = [finding for finding in audit.findings if not finding.detected]
         session.add(
-            AuditFinding(
+            ExceptionCase(
+                work_order_id=work_order.id,
                 audit_id=audit.id,
-                sop_step_id=step.id,
-                sequence=step.sequence,
-                step_name=step.name,
-                detected=finding.detected,
-                confidence=finding.confidence,
-                start_seconds=finding.start_seconds,
-                end_seconds=finding.end_seconds,
-                evidence=finding.evidence,
-                frame_timestamps=finding.frame_timestamps,
+                status=exception_status,
+                rule_code=(
+                    "INSUFFICIENT_VISUAL_EVIDENCE"
+                    if audit.decision == AuditDecision.INSUFFICIENT_EVIDENCE
+                    else "REQUIRED_STEP_MISSING"
+                ),
+                facts=[finding.evidence for finding in missing],
             )
         )
     session.commit()

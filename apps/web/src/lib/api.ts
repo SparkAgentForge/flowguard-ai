@@ -61,6 +61,7 @@ export type VideoAudit = {
   workOrderId: string
   videoId: string
   status: 'COMPLETED' | 'FAILED'
+  decision: 'PASS' | 'VIOLATION' | 'INSUFFICIENT_EVIDENCE'
   provider: string
   modelName: string
   overallPass: boolean
@@ -68,6 +69,34 @@ export type VideoAudit = {
   createdAt: string
   completedAt: string
   findings: AuditFinding[]
+}
+
+export type ReworkTask = {
+  id: string
+  exceptionId: string
+  workOrderId: string
+  assigneeId: string
+  instructions: string
+  status: 'ASSIGNED' | 'SUBMITTED' | 'IN_REVIEW' | 'APPROVED'
+  createdBy: string
+  reviewedBy: string | null
+  reviewNotes: string | null
+  completedAt: string | null
+}
+
+export type ExceptionCase = {
+  id: string
+  workOrderId: string
+  workOrderCode: string
+  auditId: string
+  status: 'PENDING' | 'MANUAL_REVIEW' | 'CONFIRMED' | 'REJECTED' | 'REWORK_ASSIGNED' | 'REWORK_SUBMITTED' | 'REWORK_REVIEW' | 'RESOLVED'
+  decision: VideoAudit['decision']
+  ruleCode: string
+  facts: string[]
+  humanReason: string | null
+  reviewedBy: string | null
+  audit: VideoAudit
+  reworkTask: ReworkTask | null
 }
 
 type DocumentRecord = { id: string }
@@ -119,6 +148,33 @@ export function inspectVideo(workOrderId: string, videoId: string, actorId: stri
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ videoId, actorId }),
+  })
+}
+
+export function listExceptions(): Promise<ExceptionCase[]> {
+  return request<ExceptionCase[]>('/exceptions')
+}
+
+export function decideException(exceptionId: string, action: 'confirm' | 'reject', actorId: string, reason: string): Promise<ExceptionCase> {
+  return request<ExceptionCase>(`/exceptions/${exceptionId}/${action}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actorId, reason }),
+  })
+}
+
+export function assignRework(exceptionId: string, actorId: string, assigneeId: string, instructions: string): Promise<ExceptionCase> {
+  return request<ExceptionCase>(`/exceptions/${exceptionId}/rework-task`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actorId, assigneeId, instructions }),
+  })
+}
+
+export async function uploadReworkVideo(taskId: string, file: File): Promise<{ id: string }> {
+  const body = new FormData(); body.append('file', file)
+  return request<{ id: string }>(`/rework-tasks/${taskId}/videos`, { method: 'POST', body })
+}
+
+export function reviewRework(taskId: string, actorId: string, videoId: string, notes: string): Promise<{ task: ReworkTask; audit: VideoAudit; workOrder: WorkOrder }> {
+  return request(`/rework-tasks/${taskId}/review`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actorId, videoId, notes }),
   })
 }
 

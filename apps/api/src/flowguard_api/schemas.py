@@ -2,7 +2,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowguard_api.models import SopStatus, VideoAuditStatus, WorkOrderStatus
+from flowguard_api.models import (
+    AuditDecision,
+    ExceptionStatus,
+    ReworkTaskStatus,
+    SopStatus,
+    VideoAuditStatus,
+    WorkOrderStatus,
+)
 
 
 def to_camel(value: str) -> str:
@@ -164,6 +171,7 @@ class VideoAuditRead(ApiModel):
     work_order_id: str
     video_id: str
     status: VideoAuditStatus
+    decision: AuditDecision
     provider: str
     model_name: str
     overall_pass: bool
@@ -171,3 +179,71 @@ class VideoAuditRead(ApiModel):
     created_at: datetime
     completed_at: datetime
     findings: list[AuditFindingRead]
+
+
+class ExceptionActionRequest(ApiModel):
+    actor_id: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReworkTaskCreate(ApiModel):
+    actor_id: str = Field(min_length=1, max_length=100)
+    assignee_id: str = Field(min_length=1, max_length=100)
+    instructions: str = Field(min_length=1, max_length=2000)
+
+
+class ReworkReviewRequest(ApiModel):
+    actor_id: str = Field(min_length=1, max_length=100)
+    video_id: str
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class ReworkTaskRead(ApiModel):
+    id: str
+    exception_id: str
+    work_order_id: str
+    assignee_id: str
+    instructions: str
+    status: ReworkTaskStatus
+    created_by: str
+    reviewed_by: str | None
+    review_notes: str | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExceptionRead(ApiModel):
+    id: str
+    work_order_id: str
+    work_order_code: str
+    audit_id: str
+    status: ExceptionStatus
+    decision: AuditDecision
+    rule_code: str
+    facts: list[str]
+    human_reason: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    audit: VideoAuditRead
+    rework_task: ReworkTaskRead | None
+
+
+class ReworkReviewResult(ApiModel):
+    task: ReworkTaskRead
+    audit: VideoAuditRead
+    work_order: WorkOrderRead
+
+
+class NotificationRead(ApiModel):
+    id: str
+    work_order_id: str
+    rework_task_id: str | None
+    recipient_id: str
+    event_type: str
+    title: str
+    message: str
+    read_at: datetime | None
+    created_at: datetime

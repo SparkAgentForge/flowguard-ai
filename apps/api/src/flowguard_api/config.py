@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     stepfun_model: str = "step-5-preview"
     frame_interval_seconds: int = 3
     max_video_frames: int = 20
+    manual_review_confidence_threshold: int = 60
     sop_extractor_provider: str = "mock"
     upload_dir: str = "./data/uploads"
     max_upload_bytes: int = 20 * 1024 * 1024

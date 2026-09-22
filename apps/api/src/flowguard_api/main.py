@@ -6,6 +6,7 @@ from flowguard_api.routes.health import router as health_router
 from flowguard_api.routes.sops import router as sops_router
 from flowguard_api.routes.video_audits import router as video_audits_router
 from flowguard_api.routes.work_orders import router as work_orders_router
+from flowguard_api.routes.workflow import router as workflow_router
 
 
 def create_app() -> FastAPI:
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(sops_router, prefix=settings.api_prefix)
     app.include_router(video_audits_router, prefix=settings.api_prefix)
     app.include_router(work_orders_router, prefix=settings.api_prefix)
+    app.include_router(workflow_router, prefix=settings.api_prefix)
     return app
 
 
