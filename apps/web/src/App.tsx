@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell'
 import { DashboardPage } from './pages/DashboardPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SopWorkspacePage } from './pages/SopWorkspacePage'
+import { WorkOrdersPage } from './pages/WorkOrdersPage'
 import './styles.css'
 
 export default function App() {
@@ -13,7 +14,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
           <Route path="sops" element={<SopWorkspacePage />} />
-          <Route path="work-orders" element={<PlaceholderPage section="工单中心" />} />
+          <Route path="work-orders" element={<WorkOrdersPage />} />
           <Route path="exceptions" element={<PlaceholderPage section="异常处置" />} />
           <Route path="reports" element={<PlaceholderPage section="证据归档" />} />
         </Route>

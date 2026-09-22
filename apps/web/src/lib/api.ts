@@ -30,6 +30,46 @@ export type SopVersion = {
   steps: SopStep[]
 }
 
+export type SopVersionSummary = Pick<SopVersion, 'id' | 'sopId' | 'code' | 'name' | 'productCode' | 'version' | 'status' | 'publishedAt'>
+
+export type WorkOrder = {
+  id: string
+  code: string
+  productCode: string
+  sopVersionId: string
+  status: string
+  currentAssignee: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AuditFinding = {
+  id: string
+  sopStepId: string
+  sequence: number
+  stepName: string
+  detected: boolean
+  confidence: number
+  startSeconds: number | null
+  endSeconds: number | null
+  evidence: string
+  frameTimestamps: number[]
+}
+
+export type VideoAudit = {
+  id: string
+  workOrderId: string
+  videoId: string
+  status: 'COMPLETED' | 'FAILED'
+  provider: string
+  modelName: string
+  overallPass: boolean
+  summary: string
+  createdAt: string
+  completedAt: string
+  findings: AuditFinding[]
+}
+
 type DocumentRecord = { id: string }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -49,6 +89,36 @@ export async function uploadAndExtractSop(file: File, actorId: string): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ actorId }),
+  })
+}
+
+export function listPublishedSops(): Promise<SopVersionSummary[]> {
+  return request<SopVersionSummary[]>('/sop-versions')
+}
+
+export function listWorkOrders(): Promise<WorkOrder[]> {
+  return request<WorkOrder[]>('/work-orders')
+}
+
+export function createWorkOrder(payload: { code: string; productCode: string; sopVersionId: string }): Promise<WorkOrder> {
+  return request<WorkOrder>('/work-orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function uploadVideo(workOrderId: string, file: File): Promise<{ id: string; filename: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  return request<{ id: string; filename: string }>(`/work-orders/${workOrderId}/videos`, { method: 'POST', body })
+}
+
+export function inspectVideo(workOrderId: string, videoId: string, actorId: string): Promise<VideoAudit> {
+  return request<VideoAudit>(`/work-orders/${workOrderId}/inspect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId, actorId }),
   })
 }
 

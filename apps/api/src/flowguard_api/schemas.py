@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowguard_api.models import SopStatus, WorkOrderStatus
+from flowguard_api.models import SopStatus, VideoAuditStatus, WorkOrderStatus
 
 
 def to_camel(value: str) -> str:
@@ -33,7 +33,7 @@ class WorkOrderRead(ApiModel):
     product_code: str
     sop_version_id: str
     status: WorkOrderStatus
-    current_assignee: str | None
+    current_assignee: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -50,6 +50,17 @@ class AuditEventRead(ApiModel):
 
 class WorkOrderDetail(WorkOrderRead):
     events: list[AuditEventRead]
+
+
+class SopVersionSummary(ApiModel):
+    id: str
+    sop_id: str
+    code: str
+    name: str
+    product_code: str
+    version: str
+    status: SopStatus
+    published_at: datetime | None
 
 
 class SourceReference(ApiModel):
@@ -119,3 +130,44 @@ class SopVersionDetail(ApiModel):
     published_at: datetime | None
     steps: list[SopStepRead]
     events: list[SopRevisionEventRead]
+
+
+class VideoRead(ApiModel):
+    id: str
+    work_order_id: str
+    filename: str
+    content_type: str
+    sha256: str
+    created_at: datetime
+
+
+class VideoAuditRequest(ApiModel):
+    video_id: str
+    actor_id: str = Field(min_length=1, max_length=100)
+
+
+class AuditFindingRead(ApiModel):
+    id: str
+    sop_step_id: str
+    sequence: int
+    step_name: str
+    detected: bool
+    confidence: int
+    start_seconds: int | None
+    end_seconds: int | None
+    evidence: str
+    frame_timestamps: list[int]
+
+
+class VideoAuditRead(ApiModel):
+    id: str
+    work_order_id: str
+    video_id: str
+    status: VideoAuditStatus
+    provider: str
+    model_name: str
+    overall_pass: bool
+    summary: str
+    created_at: datetime
+    completed_at: datetime
+    findings: list[AuditFindingRead]

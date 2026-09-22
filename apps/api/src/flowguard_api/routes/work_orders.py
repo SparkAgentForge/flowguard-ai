@@ -22,6 +22,11 @@ router = APIRouter(prefix="/work-orders", tags=["work orders"])
 SessionDependency = Annotated[Session, Depends(get_session)]
 
 
+@router.get("", response_model=list[WorkOrderRead])
+def list_work_orders(session: SessionDependency) -> list[WorkOrder]:
+    return session.scalars(select(WorkOrder).order_by(WorkOrder.created_at.desc())).all()
+
+
 @router.post("", response_model=WorkOrderRead, status_code=status.HTTP_201_CREATED)
 def create_work_order(payload: WorkOrderCreate, session: SessionDependency) -> WorkOrder:
     work_order = WorkOrder(**payload.model_dump())

@@ -56,6 +56,11 @@ class WorkOrderStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class VideoAuditStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
 class Document(Base, TimestampMixin):
     __tablename__ = "documents"
 
@@ -146,3 +151,50 @@ class AuditEvent(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class VideoAsset(Base, TimestampMixin):
+    __tablename__ = "video_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(100))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    storage_key: Mapped[str] = mapped_column(String(500), unique=True)
+
+
+class VideoAudit(Base):
+    __tablename__ = "video_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    video_id: Mapped[str] = mapped_column(ForeignKey("video_assets.id"), index=True)
+    status: Mapped[VideoAuditStatus] = mapped_column(Enum(VideoAuditStatus))
+    provider: Mapped[str] = mapped_column(String(50))
+    model_name: Mapped[str] = mapped_column(String(100))
+    overall_pass: Mapped[bool] = mapped_column(Boolean)
+    summary: Mapped[str] = mapped_column(Text)
+    raw_response: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    findings: Mapped[list["AuditFinding"]] = relationship(
+        back_populates="audit", cascade="all, delete-orphan"
+    )
+
+
+class AuditFinding(Base):
+    __tablename__ = "audit_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    audit_id: Mapped[str] = mapped_column(ForeignKey("video_audits.id"), index=True)
+    sop_step_id: Mapped[str] = mapped_column(ForeignKey("sop_steps.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    step_name: Mapped[str] = mapped_column(String(255))
+    detected: Mapped[bool] = mapped_column(Boolean)
+    confidence: Mapped[int] = mapped_column(Integer)
+    start_seconds: Mapped[int | None] = mapped_column(Integer)
+    end_seconds: Mapped[int | None] = mapped_column(Integer)
+    evidence: Mapped[str] = mapped_column(Text)
+    frame_timestamps: Mapped[list[int]] = mapped_column(JSON, default=list)
+    audit: Mapped[VideoAudit] = relationship(back_populates="findings")

@@ -17,6 +17,7 @@ from flowguard_api.schemas import (
     SopExtractRequest,
     SopUpdateRequest,
     SopVersionDetail,
+    SopVersionSummary,
 )
 from flowguard_api.services.sop_extractor import SopExtractor, get_sop_extractor
 from flowguard_api.services.sop_workflow import InvalidSopTransition, transition_sop
@@ -146,6 +147,27 @@ def extract_sop(
 @router.get("/sop-versions/{version_id}", response_model=SopVersionDetail)
 def read_sop_version(version_id: str, session: SessionDependency) -> SopVersionDetail:
     return get_sop_detail(session, version_id)
+
+
+@router.get("/sop-versions", response_model=list[SopVersionSummary])
+def list_sop_versions(session: SessionDependency) -> list[SopVersionSummary]:
+    versions = session.scalars(
+        select(SopVersion)
+        .options(selectinload(SopVersion.sop))
+        .where(SopVersion.status == SopStatus.PUBLISHED)
+        .order_by(SopVersion.created_at.desc())
+    ).all()
+    return [
+        SopVersionSummary.model_validate(
+            {
+                **version.__dict__,
+                "code": version.sop.code,
+                "name": version.sop.name,
+                "product_code": version.sop.product_code,
+            }
+        )
+        for version in versions
+    ]
 
 
 @router.put("/sop-versions/{version_id}", response_model=SopVersionDetail)
