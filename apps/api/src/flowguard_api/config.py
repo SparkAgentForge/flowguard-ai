@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./flowguard.db"
     inference_provider: str = "mock"
+    sop_extractor_provider: str = "mock"
+    upload_dir: str = "./data/uploads"
+    max_upload_bytes: int = 20 * 1024 * 1024
 
 
 @lru_cache

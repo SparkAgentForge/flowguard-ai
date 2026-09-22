@@ -3,7 +3,17 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -68,6 +78,7 @@ class Sop(Base, TimestampMixin):
 
 class SopVersion(Base, TimestampMixin):
     __tablename__ = "sop_versions"
+    __table_args__ = (UniqueConstraint("sop_id", "version", name="uq_sop_version"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     sop_id: Mapped[str] = mapped_column(ForeignKey("sops.id"), index=True)
@@ -95,6 +106,19 @@ class SopStep(Base, TimestampMixin):
     on_missing: Mapped[str] = mapped_column(String(50), default="BLOCK")
     source_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     sop_version: Mapped[SopVersion] = relationship(back_populates="steps")
+
+
+class SopRevisionEvent(Base):
+    __tablename__ = "sop_revision_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    sop_version_id: Mapped[str] = mapped_column(ForeignKey("sop_versions.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    actor_id: Mapped[str] = mapped_column(String(100))
+    old_status: Mapped[SopStatus] = mapped_column(Enum(SopStatus))
+    new_status: Mapped[SopStatus] = mapped_column(Enum(SopStatus))
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class WorkOrder(Base, TimestampMixin):
