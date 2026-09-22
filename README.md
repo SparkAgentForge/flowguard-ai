@@ -2,7 +2,7 @@
 
 FlowGuard AI 是一个面向固定装配工位的 AI 质量闭环项目，方案工作名为 **SparkSOP**。它根据标准作业程序（SOP）分析装配视频，检查关键步骤是否完整、顺序是否正确，并为异常处理、返工和复核保留可追溯证据。
 
-> 项目当前处于规划阶段，尚未提供可运行的代码。
+> 项目当前处于 MVP 开发阶段，已提供前后端基础工程和本地依赖环境。
 
 ## 目标场景
 
@@ -26,7 +26,49 @@ FlowGuard AI 是一个面向固定装配工位的 AI 质量闭环项目，方案
 
 ## 项目状态
 
-当前仓库用于项目早期设计与实现准备。后续代码、运行方式和开发说明将在功能落地后补充。
+当前已完成 React 前端、FastAPI 后端健康检查和 PostgreSQL/MinIO 本地依赖编排。业务模块将按可独立验收的提交逐步实现。
+
+## 项目结构
+
+```text
+apps/
+  api/       FastAPI 后端
+  web/       React + TypeScript 前端
+docs/        产品需求、检测场景和技术架构
+compose.yaml PostgreSQL 与 MinIO 本地环境
+```
+
+## 本地开发
+
+启动基础依赖：
+
+```bash
+docker compose up -d
+```
+
+启动后端：
+
+```bash
+cd apps/api
+python -m venv .venv
+source .venv/bin/activate  # Windows PowerShell 使用 .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+uvicorn flowguard_api.main:app --reload
+```
+
+启动前端：
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+默认访问地址：
+
+- 前端：`http://localhost:5173`
+- 后端健康检查：`http://localhost:8000/api/v1/health`
+- 后端接口文档：`http://localhost:8000/api/docs`
 
 ## 许可证
 
