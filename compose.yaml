@@ -1,6 +1,39 @@
 name: flowguard
 
 services:
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      FLOWGUARD_ENV: development
+      FLOWGUARD_DATABASE_URL: postgresql+pg8000://flowguard:flowguard@postgres:5432/flowguard
+      FLOWGUARD_UPLOAD_DIR: /data/uploads
+      FLOWGUARD_INFERENCE_PROVIDER: mock
+      FLOWGUARD_SOP_EXTRACTOR_PROVIDER: mock
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - api_uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ./apps/web
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -37,3 +70,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  api_uploads:
