@@ -17,6 +17,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+*.db
 
 # Editors and operating systems
 .idea/

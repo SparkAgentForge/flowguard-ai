@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "FlowGuard AI"
     environment: str = "development"
     api_prefix: str = "/api/v1"
+    database_url: str = "sqlite:///./flowguard.db"
     inference_provider: str = "mock"
 
 

@@ -8,8 +8,11 @@ version = "0.1.0"
 description = "FlowGuard AI audit workflow API"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.16,<2",
   "fastapi>=0.116,<1",
+  "pg8000>=1.31,<2",
   "pydantic-settings>=2.10,<3",
+  "sqlalchemy>=2.0,<3",
   "uvicorn>=0.35,<1",
 ]
 
