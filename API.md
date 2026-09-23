@@ -1,7 +1,9 @@
 # FlowGuard AI API 文档
 
-> API 版本：`0.1.0`  
-> 基础路径：`/api/v1`  
+> API 版本：`0.1.0`
+>
+> 基础路径：`/api/v1`
+>
 > 文档依据：当前 FastAPI 路由、Pydantic Schema 与 OpenAPI，共 25 条路径、27 个 HTTP 操作。
 
 ## 1. 快速入口
