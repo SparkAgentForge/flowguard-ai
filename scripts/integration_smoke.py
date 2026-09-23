@@ -1,13 +1,19 @@
+import base64
 import json
 import os
-import sys
 import urllib.error
 import urllib.request
 
 
 def get_json(url: str) -> dict:
+    request = urllib.request.Request(url)
+    username = os.environ.get("FLOWGUARD_SMOKE_USERNAME")
+    password = os.environ.get("FLOWGUARD_SMOKE_PASSWORD")
+    if username and password:
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+        request.add_header("Authorization", f"Basic {credentials}")
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
     except (OSError, urllib.error.URLError) as error:
         raise SystemExit(f"请求失败: {url}: {error}") from error

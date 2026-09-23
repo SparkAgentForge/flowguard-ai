@@ -5,6 +5,7 @@ docs/
 .env
 .env.*
 !.env.example
+deploy/.htpasswd
 
 # JavaScript
 node_modules/
@@ -19,6 +20,8 @@ __pycache__/
 .venv/
 *.db
 data/
+.runtime/
+.tools/
 
 # Editors and operating systems
 .idea/
