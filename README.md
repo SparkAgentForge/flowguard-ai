@@ -147,6 +147,8 @@ python scripts/integration_smoke.py
 
 `.env.example` 包含数据库、RustFS、上传目录、视频大小、抽帧频率、人工复核阈值、API 监听地址、Step 5 和 DeepStream 配置。`FLOWGUARD_API_HOST` 与 `FLOWGUARD_API_PORT` 会同时作用于直接启动和 Docker Compose 启动；默认 API 地址仍为 `http://localhost:8000`。Step 5 视频默认使用独立的 `FLOWGUARD_STEPFUN_FRAME_INTERVAL_SECONDS=1` 与 `FLOWGUARD_STEPFUN_MAX_VIDEO_FRAMES=20`，避免长视频一次请求发送过多图片触发上游限制。默认 `FLOWGUARD_SOP_EXTRACTOR_PROVIDER=stepfun` 会把 PDF 手册逐页转 PNG、写入 RustFS，再以 Base64 data URL 发给 Step 5 视觉解析；DOCX 仍由本地规则解析。`rule_based` 只支持 DOCX，不对 PDF 做文本层抽取。将 `FLOWGUARD_INFERENCE_PROVIDER` 改为 `stepfun` 并设置 `FLOWGUARD_STEPFUN_API_KEY` 后，视频适配器会把抽出的 JPEG 帧写入 RustFS，再以 Base64 data URL 作为 `image_url` 发送给 Step 5；改为 `deepstream` 时只调用官方 `sop-inference-bp` 的 `/v1/files` 和 `/v1/chat/completions`，执行图仍由 FlowGuard 判定。无 GPU、RustFS 或 API Key 的本地演示请保持视频推理的 `mock`。
 
+Step 5 视频推理固定加载 `apps/api/src/flowguard_api/skills/assembly-video-audit/SKILL.md`。服务会在每次推理前重新读取该文件，因此修改审核规则后无需重启。部署到其他目录时，可通过 `FLOWGUARD_SKILLS_DIR` 指向包含各 Skill 子目录的根目录；Skill 文件只作为提示词读取，不会执行其中的脚本。
+
 ## 项目结构
 
 ```text

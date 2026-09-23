@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com/v1"
     stepfun_model: str = "step-5-preview"
+    skills_dir: str = str(Path(__file__).resolve().parent / "skills")
     stepfun_timeout_seconds: int = 180
     stepfun_steps_per_request: int = 10
     deepstream_base_url: str = "http://nvds-action-sop:8300"

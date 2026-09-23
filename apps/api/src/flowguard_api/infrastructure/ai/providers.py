@@ -19,6 +19,9 @@ from flowguard_api.core.media import is_media_tool_runtime_error, resolve_media_
 from flowguard_api.core.storage import FileStorage
 from flowguard_api.infrastructure.ai.stepfun_client import Step5VisionClient
 from flowguard_api.infrastructure.storage.providers import LocalFileStorage
+from flowguard_api.services.skill_loader import SkillLoadError, load_skill
+
+VIDEO_AUDIT_SKILL = "assembly-video-audit"
 
 
 class MockInferenceAdapter:
@@ -435,8 +438,8 @@ class Step5InferenceAdapter:
                 {
                     "role": "system",
                     "content": (
-                        "你是工业装配审计员。只根据给出的视觉证据判断，禁止补全未看到的动作。"
-                        "start_seconds 和 end_seconds 必须填 null；时间区间由服务端根据真实帧计算。"
+                        self._system_prompt()
+                        + "\n\nstart_seconds 和 end_seconds 必须填 null；时间区间由服务端根据真实帧计算。"
                     ),
                 },
                 {"role": "user", "content": content},
@@ -469,6 +472,12 @@ class Step5InferenceAdapter:
             "max_tokens": 8192,
             "temperature": 0,
         }
+
+    def _system_prompt(self) -> str:
+        try:
+            return load_skill(self.settings.skills_dir, VIDEO_AUDIT_SKILL)
+        except SkillLoadError as error:
+            raise VideoInferenceError(str(error)) from error
 
     def _post_json(self, url: str, payload: dict) -> dict:
         return self.client.post_json(url, payload)
