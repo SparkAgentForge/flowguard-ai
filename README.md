@@ -25,6 +25,7 @@ docker compose up --build
 - Web 工作台：`http://localhost:5173`
 - API：`http://localhost:8000`
 - OpenAPI：`http://localhost:8000/api/docs`
+- 接口文档：[API.md](API.md)
 - PostgreSQL：`localhost:5432`
 - MinIO 控制台：`http://localhost:9001`
 
