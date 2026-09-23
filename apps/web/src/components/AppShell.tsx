@@ -38,6 +38,17 @@ export function AppShell() {
           <p className="navigation-label">质量工作台</p>
           {navigation.map((item) => <NavigationLink item={item} key={item.path} />)}
         </nav>
+        <a
+          aria-label="在新标签页打开 FlowGuard AI GitHub 仓库"
+          className="repository-link"
+          href="https://github.com/SparkAgentForge/flowguard-ai"
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          <Icon name="github" />
+          <span>GitHub 仓库</span>
+          <span aria-hidden="true" className="external-mark">↗</span>
+        </a>
         <section className="station-panel" aria-label="当前工位">
           <div className="station-panel__heading"><span className="live-indicator" />工位在线</div>
           <strong>泵体端盖 · A-03</strong><span>最后同步 16:42</span>
@@ -56,7 +67,18 @@ export function AppShell() {
           <NavLink className="brand" to="/" aria-label="FlowGuard AI 首页">
             <BrandMark /><strong>FlowGuard</strong>
           </NavLink>
-          <span className="mobile-role">质检员</span>
+          <div className="mobile-header__actions">
+            <span className="mobile-role">质检员</span>
+            <a
+              aria-label="在新标签页打开 FlowGuard AI GitHub 仓库"
+              className="mobile-repository-link"
+              href="https://github.com/SparkAgentForge/flowguard-ai"
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <Icon name="github" />
+            </a>
+          </div>
         </header>
         <main id="main-content" className="main-content"><Outlet /></main>
       </div>
