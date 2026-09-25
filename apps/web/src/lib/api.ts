@@ -50,10 +50,29 @@ export type AuditFinding = {
   stepName: string
   detected: boolean
   confidence: number
+  evidenceStatus: 'CONFIRMED' | 'MISSING' | 'MISORDERED' | 'UNCERTAIN' | 'SKIPPED'
+  evidenceScore: number
+  occluded: boolean
+  chunkIdx: number | null
+  cvBoundaryScore: number | null
   startSeconds: number | null
   endSeconds: number | null
   evidence: string
   frameTimestamps: number[]
+}
+
+export type ReviewRequest = {
+  id: string
+  stepCode: string
+  stepName: string
+  startSeconds: number
+  endSeconds: number
+  question: string
+  reason: string
+  status: 'PENDING' | 'CONFIRMED' | 'REJECTED'
+  resolvedBy?: string
+  resolvedAt?: string
+  note?: string | null
 }
 
 export type VideoAudit = {
@@ -68,6 +87,14 @@ export type VideoAudit = {
   summary: string
   createdAt: string
   completedAt: string
+  executionTrace: {
+    missingSteps: string[]
+    misorderedSteps: string[]
+    uncertainSteps: string[]
+    trace: { expectedCode: string; observedCode: string | null; status: string; reason: string }[]
+    graph: { nodes: unknown[]; edges: unknown[] }
+  }
+  reviewRequests: ReviewRequest[]
   findings: AuditFinding[]
 }
 
@@ -109,7 +136,7 @@ export type Report = {
     outcome: string
     sop: { code: string | null; name: string | null; version: string | null; sourceDocumentSha256: string | null }
     videos: { id: string; filename: string; sha256: string; kind: string }[]
-    audits: { id: string; decision: string; provider: string; model: string; promptVersion: string; summary: string; findings: AuditFinding[] }[]
+    audits: { id: string; decision: string; provider: string; model: string; promptVersion: string; summary: string; executionTrace?: VideoAudit['executionTrace']; frameAssetKeys?: string[]; findings: AuditFinding[] }[]
     humanDecision: { status: string; reason: string | null; reviewedBy: string | null } | null
     rework: { taskId: string; assigneeId: string; instructions: string; status: string; reviewedBy: string | null; reviewNotes: string | null } | null
   }
@@ -179,6 +206,24 @@ export function inspectVideo(workOrderId: string, videoId: string, actorId: stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ videoId, actorId }),
   })
+}
+
+export function resolveReviewRequest(
+  workOrderId: string,
+  auditId: string,
+  requestId: string,
+  decision: 'CONFIRMED' | 'REJECTED',
+  actorId: string,
+  note?: string,
+): Promise<ReviewRequest[]> {
+  return request<ReviewRequest[]>(
+    `/work-orders/${workOrderId}/audits/${auditId}/review-requests/${requestId}/resolve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, actorId, note }),
+    },
+  )
 }
 
 export function listExceptions(): Promise<ExceptionCase[]> {

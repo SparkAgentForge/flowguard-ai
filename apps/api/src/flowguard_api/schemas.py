@@ -148,6 +148,39 @@ class VideoRead(ApiModel):
     created_at: datetime
 
 
+class AlignmentTraceRead(ApiModel):
+    expected_code: str
+    observed_code: str | None
+    status: str
+    reason: str
+
+
+class ExecutionTraceRead(ApiModel):
+    schema_version: str | None = None
+    decision: str = "VIOLATION"
+    overall_pass: bool = False
+    summary: str = ""
+    missing_steps: list[str] = Field(default_factory=list)
+    misordered_steps: list[str] = Field(default_factory=list)
+    uncertain_steps: list[str] = Field(default_factory=list)
+    trace: list[AlignmentTraceRead] = Field(default_factory=list)
+    graph: dict = Field(default_factory=dict)
+
+
+class ReviewRequestRead(ApiModel):
+    id: str
+    step_code: str
+    step_name: str
+    start_seconds: int
+    end_seconds: int
+    question: str
+    reason: str
+    status: str
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+    note: str | None = None
+
+
 class VideoAuditRequest(ApiModel):
     video_id: str
     actor_id: str = Field(min_length=1, max_length=100)
@@ -160,6 +193,11 @@ class AuditFindingRead(ApiModel):
     step_name: str
     detected: bool
     confidence: int
+    evidence_status: str
+    evidence_score: int
+    occluded: bool
+    chunk_idx: int | None = None
+    cv_boundary_score: float | None = None
     start_seconds: int | None
     end_seconds: int | None
     evidence: str
@@ -178,7 +216,15 @@ class VideoAuditRead(ApiModel):
     summary: str
     created_at: datetime
     completed_at: datetime
+    execution_trace: ExecutionTraceRead = Field(default_factory=ExecutionTraceRead)
+    review_requests: list[ReviewRequestRead] = Field(default_factory=list)
     findings: list[AuditFindingRead]
+
+
+class ReviewRequestResolve(ApiModel):
+    actor_id: str = Field(min_length=1, max_length=100)
+    decision: str = Field(pattern="^(CONFIRMED|REJECTED)$")
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class ExceptionActionRequest(ApiModel):

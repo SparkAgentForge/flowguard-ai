@@ -4,8 +4,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from flowguard_api.database import get_session
-from flowguard_api.main import app
+from flowguard_api.application import app
+from flowguard_api.infrastructure.database import get_session
 from flowguard_api.models import Base
 
 

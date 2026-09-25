@@ -144,6 +144,8 @@ CREATED
 | POST | `/api/v1/work-orders/{work_order_id}/videos` | 上传原始装配视频 |
 | POST | `/api/v1/work-orders/{work_order_id}/inspect` | 检测指定视频 |
 | GET | `/api/v1/work-orders/{work_order_id}/audits/{audit_id}` | 查询视频审计结果 |
+| GET | `/api/v1/work-orders/{work_order_id}/audits/{audit_id}/review-requests` | 查询主动复核请求 |
+| POST | `/api/v1/work-orders/{work_order_id}/audits/{audit_id}/review-requests/{request_id}/resolve` | 确认或驳回复核请求 |
 
 ### 异常、返工与通知
 
@@ -222,7 +224,7 @@ curl -X POST "$BASE_URL/api/v1/documents" \
 }
 ```
 
-成功响应为 `SopVersionDetail`，初始状态是 `AI_EXTRACTED`。当前 `mock` 提取器返回泵体端盖装配的 4 个固定步骤；尚未进行真实 PDF/DOCX 文本解析。
+成功响应为 `SopVersionDetail`，初始状态是 `AI_EXTRACTED`。设置 `FLOWGUARD_SOP_EXTRACTOR_PROVIDER=stepfun` 后，PDF 会逐页渲染成 PNG，页面图片写入 RustFS，再把带时效的 presigned URL 作为 `image_url` 发送给 Step 5；每个候选步骤必须包含有效页码和原文引用。DOCX 仍用本地规则解析。`rule_based` 模式只支持 DOCX；PDF 不读取文本层，也不会回退到文本解析。候选结果必须人工审核后才能发布。Step 5 模式需要配置 API Key 和 Step 5 可访问的 `FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT`。
 
 ### 6.3 查询已发布 SOP
 
@@ -386,6 +388,8 @@ curl -X POST "$BASE_URL/api/v1/work-orders/$WORK_ORDER_ID/videos" \
 
 前置条件：视频属于该工单，工单为 `CREATED` 或 `INSPECTING`。重复检测同一个已经完成的视频会直接返回已有审计结果。
 
+当 `FLOWGUARD_INFERENCE_PROVIDER=stepfun` 时，API 先用 FFmpeg 抽取关键帧，将 JPEG 写入 RustFS，再把带时效的 presigned URL 作为 `image_url` 发送给 Step 5。RustFS 的内部 endpoint 供 API 写入，`FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` 必须是 Step 5 能访问的地址。
+
 响应示例：
 
 ```json
@@ -409,12 +413,24 @@ curl -X POST "$BASE_URL/api/v1/work-orders/$WORK_ORDER_ID/videos" \
       "stepName": "安装绿色密封圈",
       "detected": false,
       "confidence": 92,
+      "evidenceStatus": "MISSING",
+      "evidenceScore": 92,
+      "occluded": false,
+      "chunkIdx": null,
+      "cvBoundaryScore": null,
       "startSeconds": null,
       "endSeconds": null,
       "evidence": "在预期时间窗口内未观察到该步骤",
       "frameTimestamps": []
     }
-  ]
+  ],
+  "executionTrace": {
+    "missingSteps": ["install_seal"],
+    "misorderedSteps": [],
+    "uncertainSteps": [],
+    "trace": []
+  },
+  "reviewRequests": []
 }
 ```
 
@@ -431,7 +447,7 @@ curl -X POST "$BASE_URL/api/v1/work-orders/$WORK_ORDER_ID/videos" \
 | 文件名 | 结果 |
 | --- | --- |
 | `normal.mp4` | 所有步骤通过，工单进入 `VERIFIED` |
-| `missing-step.mp4` | 第 2 步缺失，工单进入 `EXCEPTION_PENDING` |
+| `missing-step.mp4` | 第 3 步（绿色密封圈）缺失，工单进入 `EXCEPTION_PENDING` |
 | `occluded.mp4` | 低置信度，工单进入 `MANUAL_REVIEW` |
 | `rework-normal.mp4` | 返工检测通过，工单进入 `RELEASED` |
 
@@ -619,8 +635,8 @@ PDF 不存在时会先生成报告。PDF 内容来自数据库事实，包括 SO
 ## 11. 当前限制
 
 - 没有应用级登录、权限或真实用户系统。
-- 文档提取目前为 Mock，不解析真实文档正文。
-- 视频检测默认是 Mock；StepFun 模式需要 API Key 和 FFmpeg。
+- 文档提取使用本地规则解析 PDF/DOCX 的带序号操作条目；复杂版式、扫描件 OCR 和隐含步骤仍需要后续增强或接入 LLM 提取器。
+- 视频检测默认是 Mock；Step 5 模式需要 API Key、FFmpeg 和可被 Step 5 访问的 RustFS presigned URL。
 - 上传和检测在请求内同步执行，没有后台任务进度接口。
 - 列表接口没有分页、筛选或排序参数。
 - 创建工单接口尚未强制验证 SOP 状态为 `PUBLISHED`。

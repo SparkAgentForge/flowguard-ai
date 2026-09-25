@@ -9,7 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from flowguard_api.config import get_settings
-from flowguard_api.database import get_session
+from flowguard_api.core.storage import FileStorage, sanitize_filename
+from flowguard_api.infrastructure.database import get_session
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import Document, Sop, SopRevisionEvent, SopStatus, SopStep, SopVersion
 from flowguard_api.schemas import (
     DocumentRead,
@@ -19,9 +21,12 @@ from flowguard_api.schemas import (
     SopVersionDetail,
     SopVersionSummary,
 )
-from flowguard_api.services.sop_extractor import SopExtractor, get_sop_extractor
+from flowguard_api.services.sop_extractor import (
+    DocumentExtractionError,
+    SopExtractor,
+    get_sop_extractor,
+)
 from flowguard_api.services.sop_workflow import InvalidSopTransition, transition_sop
-from flowguard_api.storage import FileStorage, get_file_storage, sanitize_filename
 
 router = APIRouter(tags=["SOP"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -99,7 +104,10 @@ def extract_sop(
     document = session.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="文档不存在")
-    extracted = extractor.extract(document.filename, storage.get(document.storage_key))
+    try:
+        extracted = extractor.extract(document.filename, storage.get(document.storage_key))
+    except DocumentExtractionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     sop = session.scalar(select(Sop).where(Sop.code == extracted.code))
     if sop is None:
         sop = Sop(code=extracted.code, name=extracted.name, product_code=extracted.product_code)

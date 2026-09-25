@@ -1,3 +1,11 @@
+"""FlowGuard application bootstrap and composition root.
+
+This module assembles the HTTP application and its routers.  It deliberately
+does not contain business rules or infrastructure implementations; those are
+provided by the routes, services, and infrastructure packages respectively.
+"""
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -35,3 +43,19 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def run() -> None:
+    """Start the HTTP server when the application module is executed directly."""
+
+    settings = get_settings()
+    uvicorn.run(
+        "flowguard_api.application:app",
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=settings.environment == "development",
+    )
+
+
+if __name__ == "__main__":
+    run()

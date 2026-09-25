@@ -16,4 +16,4 @@ COPY alembic.ini ./
 RUN pip install --no-cache-dir .
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn flowguard_api.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn flowguard_api.application:app --host ${FLOWGUARD_API_HOST:-0.0.0.0} --port ${FLOWGUARD_API_PORT:-8000}"]

@@ -6,21 +6,39 @@ services:
       context: ./apps/api
     environment:
       FLOWGUARD_ENV: development
+      FLOWGUARD_API_HOST: ${FLOWGUARD_API_HOST:-0.0.0.0}
+      FLOWGUARD_API_PORT: ${FLOWGUARD_API_PORT:-8000}
       FLOWGUARD_DATABASE_URL: postgresql+pg8000://flowguard:flowguard@postgres:5432/flowguard
       FLOWGUARD_UPLOAD_DIR: /data/uploads
-      FLOWGUARD_INFERENCE_PROVIDER: mock
-      FLOWGUARD_SOP_EXTRACTOR_PROVIDER: mock
+      FLOWGUARD_OBJECT_STORAGE_ENDPOINT: ${FLOWGUARD_OBJECT_STORAGE_ENDPOINT:-http://rustfs:9000}
+      FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT: ${FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      FLOWGUARD_OBJECT_STORAGE_BUCKET: ${FLOWGUARD_OBJECT_STORAGE_BUCKET:-flowguard}
+      FLOWGUARD_OBJECT_STORAGE_ACCESS_KEY: ${FLOWGUARD_OBJECT_STORAGE_ACCESS_KEY:-flowguard}
+      FLOWGUARD_OBJECT_STORAGE_SECRET_KEY: ${FLOWGUARD_OBJECT_STORAGE_SECRET_KEY:-change-me}
+      FLOWGUARD_OBJECT_STORAGE_REGION: ${FLOWGUARD_OBJECT_STORAGE_REGION:-us-east-1}
+      FLOWGUARD_INFERENCE_PROVIDER: ${FLOWGUARD_INFERENCE_PROVIDER:-mock}
+      FLOWGUARD_STEPFUN_API_KEY: ${FLOWGUARD_STEPFUN_API_KEY:-}
+      FLOWGUARD_STEPFUN_BASE_URL: ${FLOWGUARD_STEPFUN_BASE_URL:-https://api.stepfun.com/v1}
+      FLOWGUARD_STEPFUN_MODEL: ${FLOWGUARD_STEPFUN_MODEL:-step-5-preview}
+      FLOWGUARD_STEPFUN_FRAME_URL_EXPIRES_SECONDS: ${FLOWGUARD_STEPFUN_FRAME_URL_EXPIRES_SECONDS:-900}
+      FLOWGUARD_STEPFUN_TIMEOUT_SECONDS: ${FLOWGUARD_STEPFUN_TIMEOUT_SECONDS:-180}
+      FLOWGUARD_DEEPSTREAM_BASE_URL: ${FLOWGUARD_DEEPSTREAM_BASE_URL:-http://nvds-action-sop:8300}
+      FLOWGUARD_DEEPSTREAM_API_KEY: ${FLOWGUARD_DEEPSTREAM_API_KEY:-}
+      FLOWGUARD_DEEPSTREAM_TIMEOUT_SECONDS: ${FLOWGUARD_DEEPSTREAM_TIMEOUT_SECONDS:-300}
+      FLOWGUARD_SOP_EXTRACTOR_PROVIDER: ${FLOWGUARD_SOP_EXTRACTOR_PROVIDER:-stepfun}
+      FLOWGUARD_SOP_MANUAL_PAGE_DPI: ${FLOWGUARD_SOP_MANUAL_PAGE_DPI:-144}
+      FLOWGUARD_SOP_MANUAL_MAX_PAGES: ${FLOWGUARD_SOP_MANUAL_MAX_PAGES:-50}
     ports:
-      - "8000:8000"
+      - "${FLOWGUARD_API_PORT:-8000}:${FLOWGUARD_API_PORT:-8000}"
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      rustfs:
         condition: service_healthy
     volumes:
       - api_uploads:/data/uploads
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:' + '${FLOWGUARD_API_PORT:-8000}' + '/api/v1/health')\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -50,24 +68,40 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
     environment:
-      MINIO_ROOT_USER: flowguard
-      MINIO_ROOT_PASSWORD: change-me
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-flowguard}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-change-me}
     ports:
+      # Spark forwards the node's 9000 to its assigned public 90NN port.
       - "9000:9000"
-      - "9001:9001"
+      # Keep the admin console reachable only through an SSH tunnel.
+      - "127.0.0.1:9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
+
+  rustfs-permissions:
+    image: alpine:3.20
+    volumes:
+      - rustfs_data:/data
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+    restart: "no"
 
 volumes:
   postgres_data:
-  minio_data:
+  rustfs_data:
   api_uploads:

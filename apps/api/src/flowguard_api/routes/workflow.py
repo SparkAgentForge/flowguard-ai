@@ -8,7 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from flowguard_api.config import get_settings
-from flowguard_api.database import get_session
+from flowguard_api.core.inference import VideoInferenceError
+from flowguard_api.core.storage import FileStorage, sanitize_filename
+from flowguard_api.infrastructure.database import get_session
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import (
     AuditDecision,
     ExceptionCase,
@@ -32,9 +35,7 @@ from flowguard_api.schemas import (
     VideoRead,
 )
 from flowguard_api.services.video_audit import InvalidVideoAudit, execute_video_audit
-from flowguard_api.services.video_inference import VideoInferenceError
 from flowguard_api.services.work_order_state import transition_work_order
-from flowguard_api.storage import FileStorage, get_file_storage, sanitize_filename
 
 router = APIRouter(tags=["exception workflow"])
 SessionDependency = Annotated[Session, Depends(get_session)]

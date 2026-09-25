@@ -3,9 +3,9 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from flowguard_api.main import app
+from flowguard_api.application import app
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import Sop, SopStatus, SopStep, SopVersion, WorkOrder
-from flowguard_api.storage import get_file_storage
 
 
 class MemoryStorage:

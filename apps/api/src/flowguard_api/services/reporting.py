@@ -12,6 +12,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from flowguard_api.core.storage import FileStorage
 from flowguard_api.models import (
     Document,
     ExceptionCase,
@@ -24,7 +25,6 @@ from flowguard_api.models import (
     WorkOrder,
     WorkOrderStatus,
 )
-from flowguard_api.storage import FileStorage
 
 
 class ReportNotReady(ValueError):
@@ -92,12 +92,19 @@ def build_report_content(session: Session, work_order: WorkOrder) -> dict:
                 "model": audit.model_name,
                 "promptVersion": "video-audit-v1",
                 "summary": audit.summary,
+                "executionTrace": audit.execution_trace,
+                "frameAssetKeys": audit.raw_response.get("frame_asset_keys", []),
                 "findings": [
                     {
                         "sequence": finding.sequence,
                         "stepName": finding.step_name,
                         "detected": finding.detected,
                         "confidence": finding.confidence,
+                        "evidenceStatus": finding.evidence_status,
+                        "evidenceScore": finding.evidence_score,
+                        "occluded": finding.occluded,
+                        "chunkIdx": finding.chunk_idx,
+                        "cvBoundaryScore": finding.cv_boundary_score,
                         "startSeconds": finding.start_seconds,
                         "endSeconds": finding.end_seconds,
                         "evidence": finding.evidence,
@@ -210,13 +217,13 @@ def render_report_pdf(content: dict) -> bytes:
                 ),
             ]
         )
-        rows = [["步骤", "结果", "置信度", "时间", "证据"]]
+        rows = [["步骤", "结果", "证据可信度", "时间", "证据"]]
         for finding in audit["findings"]:
             rows.append(
                 [
                     str(finding["sequence"]),
                     finding["stepName"],
-                    f"{'通过' if finding['detected'] else '未观察'} · {finding['confidence']}%",
+                    f"{finding['evidenceStatus']} · {finding['evidenceScore']}%",
                     f"{finding['startSeconds']} - {finding['endSeconds']}",
                     Paragraph(finding["evidence"], body),
                 ]

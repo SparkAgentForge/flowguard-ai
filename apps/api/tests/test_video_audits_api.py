@@ -84,3 +84,40 @@ def test_published_sop_versions_are_listed(client: TestClient, session: Session)
     response = client.get("/api/v1/sop-versions")
     assert response.status_code == 200
     assert response.json()[0]["status"] == "PUBLISHED"
+
+
+def test_occluded_audit_exposes_targeted_review_request(
+    client: TestClient, session: Session
+) -> None:
+    work_order_id = seed_published_work_order(session, "WO-VIDEO-004")
+    uploaded = client.post(
+        f"/api/v1/work-orders/{work_order_id}/videos",
+        files={"file": ("occluded.mp4", BytesIO(b"demo-video"), "video/mp4")},
+    )
+    video_id = uploaded.json()["id"]
+    inspected = client.post(
+        f"/api/v1/work-orders/{work_order_id}/inspect",
+        json={"videoId": video_id, "actorId": "operator-01"},
+    )
+
+    assert inspected.status_code == 201
+    body = inspected.json()
+    assert body["decision"] == "INSUFFICIENT_EVIDENCE"
+    assert body["findings"][1]["evidenceStatus"] == "UNCERTAIN"
+    assert body["reviewRequests"][0]["stepName"] == "安装密封圈"
+    assert body["executionTrace"]["uncertainSteps"] == ["install_seal"]
+    request_id = body["reviewRequests"][0]["id"]
+
+    listed = client.get(
+        f"/api/v1/work-orders/{work_order_id}/audits/{body['id']}/review-requests"
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["status"] == "PENDING"
+
+    resolved = client.post(
+        f"/api/v1/work-orders/{work_order_id}/audits/{body['id']}"
+        f"/review-requests/{request_id}/resolve",
+        json={"actorId": "reviewer-01", "decision": "CONFIRMED"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()[0]["status"] == "CONFIRMED"

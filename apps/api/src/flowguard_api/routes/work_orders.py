@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from flowguard_api.database import get_session
+from flowguard_api.infrastructure.database import get_session
 from flowguard_api.models import AuditEvent, WorkOrder
 from flowguard_api.schemas import (
     WorkOrderCreate,

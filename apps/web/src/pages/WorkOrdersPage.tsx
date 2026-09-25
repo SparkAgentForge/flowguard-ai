@@ -7,6 +7,7 @@ import {
   inspectVideo,
   listPublishedSops,
   listWorkOrders,
+  resolveReviewRequest,
   type SopVersionSummary,
   type VideoAudit,
   type WorkOrder,
@@ -70,11 +71,22 @@ export function WorkOrdersPage() {
     try {
       const video = await uploadVideo(selectedOrder.id, file)
       const result = await inspectVideo(selectedOrder.id, video.id, ACTOR_ID)
-      const nextStatus = result.overallPass ? 'VERIFIED' : 'EXCEPTION_PENDING'
+      const nextStatus = result.decision === 'PASS' ? 'VERIFIED' : result.decision === 'INSUFFICIENT_EVIDENCE' ? 'MANUAL_REVIEW' : 'EXCEPTION_PENDING'
       setAudit(result); setSelectedOrder((current) => current ? { ...current, status: nextStatus } : current)
       setOrders((current) => current.map((item) => item.id === selectedOrder.id ? { ...item, status: nextStatus } : item))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '视频检测失败，请稍后重试。')
+    } finally { setBusy(false) }
+  }
+
+  async function resolveReview(requestId: string, decision: 'CONFIRMED' | 'REJECTED') {
+    if (!selectedOrder || !audit) return
+    setBusy(true); setError('')
+    try {
+      const requests = await resolveReviewRequest(selectedOrder.id, audit.id, requestId, decision, ACTOR_ID)
+      setAudit((current) => current ? { ...current, reviewRequests: requests } : current)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '复核请求处理失败。')
     } finally { setBusy(false) }
   }
 
@@ -83,7 +95,7 @@ export function WorkOrdersPage() {
   return (
     <div className="work-orders-page">
       <header className="page-heading">
-        <div><p className="eyebrow">视频证据 / 模拟检测</p><h1>工单中心</h1><p>选择已发布 SOP，上传固定工位视频，按步骤查看模型观察到的证据和时间线。</p></div>
+        <div><p className="eyebrow">视频证据 / 执行图判定</p><h1>工单中心</h1><p>选择已发布 SOP，上传固定工位视频，按步骤查看模型观察到的证据和时间线。</p></div>
         {selectedOrder && <StatusBadge tone={statusTone(selectedOrder.status)}>{statusCopy[selectedOrder.status] ?? selectedOrder.status}</StatusBadge>}
       </header>
       <div className="work-orders-layout">
@@ -98,12 +110,20 @@ export function WorkOrdersPage() {
           <div className="section-heading"><div><span className="section-kicker">02 / 送入视频</span><h2>{selectedOrder ? selectedOrder.code : '等待选择工作单'}</h2></div>{selectedSop && <span>{selectedSop.code} / {selectedSop.version}</span>}</div>
           <div className="video-dropzone"><div className="video-dropzone__mark" aria-hidden="true">＋</div><strong>{file?.name ?? '选择装配视频'}</strong><span>MP4 / MOV / WebM，最大 500 MiB</span><input ref={inputRef} accept="video/mp4,video/quicktime,video/webm,video/x-matroska" className="visually-hidden" onChange={chooseFile} type="file" /><button className="secondary-action" onClick={() => inputRef.current?.click()} type="button">{file ? '更换视频' : '选择视频'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <button className="primary-action" disabled={busy || !selectedOrder || !file} onClick={runInspection} type="button">{busy ? '正在上传并检测…' : '开始模拟检测'} <Icon name="arrow" /></button>
+          <button className="primary-action" disabled={busy || !selectedOrder || !file} onClick={runInspection} type="button">{busy ? '正在上传并审计…' : '开始视频审计'} <Icon name="arrow" /></button>
         </section>
       </div>
       <section className="audit-result" aria-live="polite">
-        <div className="section-heading"><div><span className="section-kicker">03 / 证据时间线</span><h2>{audit ? (audit.overallPass ? '全部步骤已观察到' : '发现需要人工确认的步骤') : '检测结果将在这里出现'}</h2></div>{audit && <StatusBadge tone={audit.overallPass ? 'success' : 'danger'}>{audit.overallPass ? 'VERIFIED' : 'EXCEPTION_PENDING'}</StatusBadge>}</div>
-        {audit ? <><p className="audit-summary">{audit.summary}</p><div className="evidence-timeline">{audit.findings.map((finding) => <article className={`timeline-item${finding.detected ? '' : ' is-missing'}`} key={finding.id}><div className="timeline-item__rail"><span>{String(finding.sequence).padStart(2, '0')}</span><i /></div><div className="timeline-item__body"><div className="timeline-item__heading"><h3>{finding.stepName}</h3><strong>{finding.detected ? '已观察' : '未观察到'}</strong></div><p>{finding.evidence}</p><div className="timeline-item__meta"><span>{formatSeconds(finding.startSeconds)} – {formatSeconds(finding.endSeconds)}</span><span>置信度 {finding.confidence}%</span><span>关键帧 {finding.frameTimestamps.length} 张</span></div></div></article>)}</div></> : <div className="audit-empty"><span>03</span><p>上传视频并开始检测后，这里会按 SOP 顺序展示每一步的时间范围、置信度和证据说明。</p></div>}
+        <div className="section-heading"><div><span className="section-kicker">03 / 证据时间线</span><h2>{audit ? (audit.decision === 'PASS' ? '执行图验证通过' : audit.decision === 'VIOLATION' ? '执行图发现流程偏差' : '证据不足，等待定向复核') : '检测结果将在这里出现'}</h2></div>{audit && <StatusBadge tone={audit.decision === 'PASS' ? 'success' : audit.decision === 'INSUFFICIENT_EVIDENCE' ? 'warning' : 'danger'}>{audit.decision}</StatusBadge>}</div>
+        {audit ? <>
+          <p className="audit-summary">{audit.summary}</p>
+          <div className="evidence-timeline">{audit.findings.map((finding) => {
+            const uncertain = finding.evidenceStatus === 'UNCERTAIN'
+            const missing = finding.evidenceStatus === 'MISSING' || finding.evidenceStatus === 'MISORDERED'
+            return <article className={`timeline-item${uncertain ? ' is-uncertain' : missing ? ' is-missing' : ''}`} key={finding.id}><div className="timeline-item__rail"><span>{String(finding.sequence).padStart(2, '0')}</span><i /></div><div className="timeline-item__body"><div className="timeline-item__heading"><h3>{finding.stepName}</h3><strong>{finding.evidenceStatus === 'CONFIRMED' ? '证据充分' : finding.evidenceStatus === 'SKIPPED' ? '可选步骤' : finding.evidenceStatus === 'UNCERTAIN' ? '证据不足' : finding.evidenceStatus === 'MISORDERED' ? '顺序异常' : '未观察到'}</strong></div><p>{finding.evidence}</p><div className="timeline-item__meta"><span>{formatSeconds(finding.startSeconds)} – {formatSeconds(finding.endSeconds)}</span><span>证据可信度 {finding.evidenceScore}%</span><span>关键帧 {finding.frameTimestamps.length} 张</span>{finding.occluded && <span>画面遮挡</span>}</div></div></article>
+          })}</div>
+          {audit.reviewRequests.length > 0 && <div className="review-request-list"><div className="section-heading"><div><span className="section-kicker">04 / 主动复核</span><h2>只复核有争议的片段</h2></div><span>{audit.reviewRequests.filter((item) => item.status === 'PENDING').length} 待处理</span></div>{audit.reviewRequests.map((item) => <article className="review-request" key={item.id}><div><strong>{item.stepName}</strong><p>{item.question}</p><small>{formatSeconds(item.startSeconds)} – {formatSeconds(item.endSeconds)} · {item.reason}</small></div>{item.status === 'PENDING' ? <div className="review-request__actions"><button className="secondary-action" disabled={busy} onClick={() => resolveReview(item.id, 'REJECTED')} type="button">证据不足</button><button className="primary-action" disabled={busy} onClick={() => resolveReview(item.id, 'CONFIRMED')} type="button">确认完成</button></div> : <StatusBadge tone={item.status === 'CONFIRMED' ? 'success' : 'danger'}>{item.status === 'CONFIRMED' ? '已确认' : '已驳回'}</StatusBadge>}</article>)}</div>}
+        </> : <div className="audit-empty"><span>03</span><p>上传视频并开始审计后，这里会按 SOP 顺序展示每一步的时间范围、证据状态和执行轨迹。</p></div>}
       </section>
     </div>
   )

@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from flowguard_api.database import get_session
+from flowguard_api.core.storage import FileStorage
+from flowguard_api.infrastructure.database import get_session
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import Report, WorkOrder
 from flowguard_api.schemas import ReportRead, ReportSummary
 from flowguard_api.services.reporting import ReportNotReady, get_or_create_report
-from flowguard_api.storage import FileStorage, get_file_storage
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 SessionDependency = Annotated[Session, Depends(get_session)]

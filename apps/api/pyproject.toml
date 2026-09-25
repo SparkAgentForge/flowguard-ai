@@ -9,8 +9,11 @@ description = "FlowGuard AI audit workflow API"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.16,<2",
+  "boto3>=1.40,<2",
   "fastapi>=0.116,<1",
   "pg8000>=1.31,<2",
+  "Pillow>=11,<13",
+  "pypdfium2>=4.30,<5",
   "pydantic-settings>=2.10,<3",
   "python-multipart>=0.0.20,<1",
   "reportlab>=4.2,<5",

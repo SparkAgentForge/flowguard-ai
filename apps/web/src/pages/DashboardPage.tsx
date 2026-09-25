@@ -6,7 +6,7 @@ import { WorkflowFigure } from '../components/WorkflowFigure'
 
 const taskQueue = [
   { type: '异常确认', title: 'WO-2026-091 · 密封圈步骤未检测到', detail: 'A-03 工位 · 2 分钟前', tone: 'danger' as const },
-  { type: 'SOP 审核', title: '泵体端盖装配 V1.3-r2', detail: 'AI 提取 4 个步骤 · 18 分钟前', tone: 'warning' as const },
+  { type: 'SOP 审核', title: '泵体端盖装配 V1.3-r2', detail: 'AI 提取 6 个步骤 · 18 分钟前', tone: 'warning' as const },
   { type: '返工复核', title: 'WO-2026-084 · 返工视频已提交', detail: '操作员 07 · 34 分钟前', tone: 'neutral' as const },
 ]
 

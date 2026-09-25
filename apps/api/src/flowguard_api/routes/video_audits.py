@@ -8,7 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from flowguard_api.config import get_settings
-from flowguard_api.database import get_session
+from flowguard_api.core.inference import VideoInferenceError
+from flowguard_api.core.storage import FileStorage, sanitize_filename
+from flowguard_api.infrastructure.database import get_session
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import (
     AuditDecision,
     ExceptionCase,
@@ -18,12 +21,17 @@ from flowguard_api.models import (
     VideoAuditStatus,
     WorkOrder,
     WorkOrderStatus,
+    utc_now,
 )
-from flowguard_api.schemas import VideoAuditRead, VideoAuditRequest, VideoRead
+from flowguard_api.schemas import (
+    ReviewRequestRead,
+    ReviewRequestResolve,
+    VideoAuditRead,
+    VideoAuditRequest,
+    VideoRead,
+)
 from flowguard_api.services.video_audit import InvalidVideoAudit, execute_video_audit
-from flowguard_api.services.video_inference import VideoInferenceError
 from flowguard_api.services.work_order_state import transition_work_order
-from flowguard_api.storage import FileStorage, get_file_storage, sanitize_filename
 
 router = APIRouter(prefix="/work-orders", tags=["video audits"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -171,7 +179,11 @@ def inspect_video(
                 "关键步骤证据不足",
             )
             exception_status = ExceptionStatus.MANUAL_REVIEW
-        missing = [finding for finding in audit.findings if not finding.detected]
+        missing = [
+            finding
+            for finding in audit.findings
+            if finding.evidence_status in {"MISSING", "MISORDERED", "UNCERTAIN"}
+        ]
         session.add(
             ExceptionCase(
                 work_order_id=work_order.id,
@@ -201,3 +213,57 @@ def read_video_audit(
     if audit is None:
         raise HTTPException(status_code=404, detail="视频审计不存在")
     return _get_audit_detail(session, audit.id)
+
+
+@router.get(
+    "/{work_order_id}/audits/{audit_id}/review-requests",
+    response_model=list[ReviewRequestRead],
+)
+def list_review_requests(
+    work_order_id: str, audit_id: str, session: SessionDependency
+) -> list[dict]:
+    audit = session.scalar(
+        select(VideoAudit).where(
+            VideoAudit.id == audit_id, VideoAudit.work_order_id == work_order_id
+        )
+    )
+    if audit is None:
+        raise HTTPException(status_code=404, detail="视频审计不存在")
+    return audit.review_requests or []
+
+
+@router.post(
+    "/{work_order_id}/audits/{audit_id}/review-requests/{request_id}/resolve",
+    response_model=list[ReviewRequestRead],
+)
+def resolve_review_request(
+    work_order_id: str,
+    audit_id: str,
+    request_id: str,
+    payload: ReviewRequestResolve,
+    session: SessionDependency,
+) -> list[dict]:
+    audit = session.scalar(
+        select(VideoAudit).where(
+            VideoAudit.id == audit_id, VideoAudit.work_order_id == work_order_id
+        )
+    )
+    if audit is None:
+        raise HTTPException(status_code=404, detail="视频审计不存在")
+    requests = list(audit.review_requests or [])
+    target = next((item for item in requests if item.get("id") == request_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="复核请求不存在")
+    if target.get("status") != "PENDING":
+        raise HTTPException(status_code=409, detail="复核请求已经处理")
+    target.update(
+        {
+            "status": payload.decision,
+            "resolved_by": payload.actor_id,
+            "resolved_at": utc_now().isoformat(),
+            "note": payload.note,
+        }
+    )
+    audit.review_requests = requests
+    session.commit()
+    return requests
