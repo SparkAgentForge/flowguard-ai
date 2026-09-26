@@ -43,6 +43,16 @@ export type WorkOrder = {
   updatedAt: string
 }
 
+export type VideoAsset = {
+  id: string
+  workOrderId: string
+  reworkTaskId: string | null
+  filename: string
+  contentType: string
+  sha256: string
+  createdAt: string
+}
+
 export type AuditFinding = {
   id: string
   sopStepId: string
@@ -65,8 +75,8 @@ export type ReviewRequest = {
   id: string
   stepCode: string
   stepName: string
-  startSeconds: number
-  endSeconds: number
+  startSeconds: number | null
+  endSeconds: number | null
   question: string
   reason: string
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED'
@@ -158,12 +168,53 @@ export type ReportSummary = {
 
 type DocumentRecord = { id: string }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1${path}`, init)
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null
-    throw new Error(payload?.detail || `请求失败（${response.status}）`)
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status = 0,
+    readonly code = 'REQUEST_FAILED',
+  ) {
+    super(message)
+    this.name = 'ApiError'
   }
+}
+
+function defaultErrorMessage(status: number): string {
+  if (status === 400) return '请求内容有误，请检查填写内容后重试。'
+  if (status === 401 || status === 403) return '当前操作没有权限，请重新登录后重试。'
+  if (status === 404) return '找不到对应记录，请刷新页面后重试。'
+  if (status === 409) return '数据已发生变化，请刷新页面后重试。'
+  if (status === 413) return '文件超过大小限制，请选择更小的文件。'
+  if (status === 415) return '文件格式不受支持，请选择 PDF、DOCX 或支持的视频格式。'
+  if (status === 422) return '提交内容无法处理，请检查后重试。'
+  if (status === 503) return '服务或数据库暂时不可用，请稍后重试。'
+  if (status >= 500) return '服务暂时无法完成请求，请稍后重试。'
+  return '请求未完成，请稍后重试。'
+}
+
+function responseMessage(payload: unknown, status: number): { message: string; code: string } {
+  if (payload && typeof payload === 'object') {
+    const record = payload as { detail?: unknown; code?: unknown }
+    if (typeof record.detail === 'string' && record.detail.trim()) {
+      return { message: record.detail, code: typeof record.code === 'string' ? record.code : 'REQUEST_FAILED' }
+    }
+  }
+  return { message: defaultErrorMessage(status), code: 'REQUEST_FAILED' }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`/api/v1${path}`, init)
+  } catch {
+    throw new ApiError('无法连接后端服务，请确认 API 已启动后重试。', 0, 'NETWORK_ERROR')
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    const failure = responseMessage(payload, response.status)
+    throw new ApiError(failure.message, response.status, failure.code)
+  }
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
@@ -178,12 +229,28 @@ export async function uploadAndExtractSop(file: File, actorId: string): Promise<
   })
 }
 
-export function listPublishedSops(): Promise<SopVersionSummary[]> {
-  return request<SopVersionSummary[]>('/sop-versions')
+export function listSops(includeUnpublished = false): Promise<SopVersionSummary[]> {
+  return request<SopVersionSummary[]>(`/sop-versions${includeUnpublished ? '?include_unpublished=true' : ''}`)
+}
+
+export function readSop(versionId: string): Promise<SopVersion> {
+  return request<SopVersion>(`/sop-versions/${versionId}`)
 }
 
 export function listWorkOrders(): Promise<WorkOrder[]> {
   return request<WorkOrder[]>('/work-orders')
+}
+
+export function listAudits(workOrderId: string): Promise<VideoAudit[]> {
+  return request<VideoAudit[]>(`/work-orders/${workOrderId}/audits`)
+}
+
+export function listVideos(workOrderId: string): Promise<VideoAsset[]> {
+  return request<VideoAsset[]>(`/work-orders/${workOrderId}/videos`)
+}
+
+export function videoContentUrl(workOrderId: string, videoId: string): string {
+  return `/api/v1/work-orders/${workOrderId}/videos/${videoId}/content`
 }
 
 export function createWorkOrder(payload: { code: string; productCode: string; sopVersionId: string }): Promise<WorkOrder> {
@@ -191,6 +258,14 @@ export function createWorkOrder(payload: { code: string; productCode: string; so
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+}
+
+export function deleteWorkOrder(workOrderId: string, actorId: string, confirmation: string): Promise<void> {
+  return request<void>(`/work-orders/${workOrderId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actorId, confirmation }),
   })
 }
 
@@ -274,8 +349,8 @@ export function updateSop(version: SopVersion, actorId: string): Promise<SopVers
         sequence: step.sequence,
         name: step.name,
         required: step.required,
-        preconditions: step.preconditions,
-        evidenceRequirements: step.evidenceRequirements,
+        preconditions: step.preconditions.map((item) => item.trim()).filter(Boolean),
+        evidenceRequirements: step.evidenceRequirements.map((item) => item.trim()).filter(Boolean),
         onMissing: step.onMissing,
         sourceRefs: step.sourceRefs,
       })),

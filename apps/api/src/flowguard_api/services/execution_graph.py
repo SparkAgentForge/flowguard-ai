@@ -47,6 +47,7 @@ class EvidenceEvaluation:
 def compile_execution_graph(steps: Iterable[SopStep]) -> dict[str, Any]:
     """Compile the reviewed SOP rows into a serializable execution graph."""
     ordered = sorted(steps, key=lambda item: item.sequence)
+    required = [step for step in ordered if step.required]
     return {
         "schema_version": "1.0",
         "nodes": [
@@ -62,8 +63,8 @@ def compile_execution_graph(steps: Iterable[SopStep]) -> dict[str, Any]:
             for step in ordered
         ],
         "edges": [
-            {"from": ordered[index - 1].code, "to": step.code, "type": "required_before"}
-            for index, step in enumerate(ordered)
+            {"from": required[index - 1].code, "to": step.code, "type": "required_before"}
+            for index, step in enumerate(required)
             if index > 0
         ],
     }
@@ -83,37 +84,46 @@ def _event_from_finding(finding: Any) -> ObservedEvent:
 
 def _align(steps: list[SopStep], events: list[ObservedEvent]) -> list[AlignmentItem]:
     expected = sorted(steps, key=lambda item: item.sequence)
+    required = [step for step in expected if step.required]
     observed = sorted(
         (event for event in events if event.start_seconds is not None),
         key=lambda event: (event.start_seconds if event.start_seconds is not None else inf),
     )
-    expected_index = {step.code: index for index, step in enumerate(expected)}
-    consumed: set[str] = set()
+    expected_index = {step.code: index for index, step in enumerate(required)}
+    optional_codes = {step.code for step in expected if not step.required}
+    observed_codes: set[str] = set()
+    missing_codes: set[str] = set()
     cursor = 0
     result: list[AlignmentItem] = []
 
     for event in observed:
-        index = expected_index.get(event.step_code)
-        if index is None:
-            continue
-        if event.step_code in consumed:
+        if event.step_code in observed_codes:
             result.append(
                 AlignmentItem(
                     event.step_code, event.step_code, "DUPLICATE", "同一动作在视频中重复出现"
                 )
             )
             continue
+        if event.step_code in optional_codes:
+            observed_codes.add(event.step_code)
+            result.append(
+                AlignmentItem(event.step_code, event.step_code, "MATCHED", "观察到可选活动")
+            )
+            continue
+        index = expected_index.get(event.step_code)
+        if index is None:
+            continue
+        observed_codes.add(event.step_code)
         if index < cursor:
             result.append(
                 AlignmentItem(
                     event.step_code, event.step_code, "MISORDERED", "动作出现在其前置步骤之后"
                 )
             )
-            consumed.add(event.step_code)
             continue
         if index > cursor:
-            for missing in expected[cursor:index]:
-                if missing.code not in consumed:
+            for missing in required[cursor:index]:
+                if missing.code not in missing_codes:
                     result.append(
                         AlignmentItem(
                             missing.code,
@@ -122,15 +132,14 @@ def _align(steps: list[SopStep], events: list[ObservedEvent]) -> list[AlignmentI
                             f"在观察到 {event.step_code} 前未观察到该步骤",
                         )
                     )
-                    consumed.add(missing.code)
+                    missing_codes.add(missing.code)
         result.append(
             AlignmentItem(event.step_code, event.step_code, "MATCHED", "按 SOP 顺序观察到")
         )
-        consumed.add(event.step_code)
         cursor = max(cursor, index + 1)
 
-    for step in expected:
-        if step.code not in consumed:
+    for step in required:
+        if step.code not in observed_codes and step.code not in missing_codes:
             result.append(AlignmentItem(step.code, None, "MISSING", "整段视频中没有可用动作证据"))
     return result
 
@@ -213,10 +222,10 @@ def evaluate_evidence(
 
 
 def _review_request(step: SopStep, finding: Any, reason: str) -> dict[str, Any]:
-    start = finding.start_seconds if finding.start_seconds is not None else 0
-    end = finding.end_seconds if finding.end_seconds is not None else start + 6
+    start = finding.start_seconds
+    end = finding.end_seconds
     return {
-        "id": f"review-{step.code}-{start}",
+        "id": f"review-{step.code}-{start if start is not None else 'unknown'}",
         "step_code": step.code,
         "step_name": step.name,
         "start_seconds": start,

@@ -28,3 +28,8 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+
+# AI Setting
+.impeccable.md
+PRODUCT.md

@@ -15,13 +15,19 @@ down_revision: str | None = "8e7d4d7f2c91"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+audit_decision_enum = sa.Enum(
+    "PASS", "VIOLATION", "INSUFFICIENT_EVIDENCE", name="auditdecision"
+)
+
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        audit_decision_enum.create(op.get_bind(), checkfirst=True)
     op.add_column(
         "video_audits",
         sa.Column(
             "decision",
-            sa.Enum("PASS", "VIOLATION", "INSUFFICIENT_EVIDENCE", name="auditdecision"),
+            audit_decision_enum,
             nullable=False,
             server_default="VIOLATION",
         ),
@@ -133,3 +139,5 @@ def downgrade() -> None:
     op.drop_index("ix_exceptions_audit_id", table_name="exceptions")
     op.drop_table("exceptions")
     op.drop_column("video_audits", "decision")
+    if op.get_bind().dialect.name == "postgresql":
+        audit_decision_enum.drop(op.get_bind(), checkfirst=True)

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -31,6 +32,7 @@ from flowguard_api.schemas import (
     VideoRead,
 )
 from flowguard_api.services.video_audit import InvalidVideoAudit, execute_video_audit
+from flowguard_api.services.video_preview import VideoPreviewError, ensure_browser_preview
 from flowguard_api.services.work_order_state import transition_work_order
 
 router = APIRouter(prefix="/work-orders", tags=["video audits"])
@@ -57,6 +59,54 @@ def _get_audit_detail(session: Session, audit_id: str) -> VideoAuditRead:
     return VideoAuditRead.model_validate(
         {**audit.__dict__, "findings": sorted(audit.findings, key=lambda item: item.sequence)}
     )
+
+
+@router.get("/{work_order_id}/audits", response_model=list[VideoAuditRead])
+def list_video_audits(work_order_id: str, session: SessionDependency) -> list[VideoAuditRead]:
+    _get_work_order(session, work_order_id)
+    audit_ids = session.scalars(
+        select(VideoAudit.id)
+        .where(
+            VideoAudit.work_order_id == work_order_id,
+        )
+        .order_by(VideoAudit.created_at.desc())
+    ).all()
+    return [_get_audit_detail(session, audit_id) for audit_id in audit_ids]
+
+
+@router.get("/{work_order_id}/videos", response_model=list[VideoRead])
+def list_videos(work_order_id: str, session: SessionDependency) -> list[VideoAsset]:
+    _get_work_order(session, work_order_id)
+    return session.scalars(
+        select(VideoAsset)
+        .where(VideoAsset.work_order_id == work_order_id)
+        .order_by(VideoAsset.created_at.desc())
+    ).all()
+
+
+@router.get("/{work_order_id}/videos/{video_id}/content")
+def video_content(
+    work_order_id: str,
+    video_id: str,
+    session: SessionDependency,
+    storage: StorageDependency,
+) -> Response:
+    _get_work_order(session, work_order_id)
+    video = session.scalar(
+        select(VideoAsset).where(
+            VideoAsset.id == video_id, VideoAsset.work_order_id == work_order_id
+        )
+    )
+    if video is None:
+        raise HTTPException(status_code=404, detail="视频不存在或不属于该工作单")
+    try:
+        preview_key = ensure_browser_preview(storage, video)
+    except VideoPreviewError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    try:
+        return RedirectResponse(storage.get_url(preview_key, expires_seconds=3600))
+    except RuntimeError:
+        return Response(content=storage.get(preview_key), media_type="video/mp4")
 
 
 @router.post(
@@ -154,6 +204,16 @@ def inspect_video(
             raw_response={"error": str(error)},
         )
         session.add(audit)
+        # Do not leave the work order in INSPECTING after a provider or media
+        # failure. The uploaded video remains available for a retry.
+        if work_order.status == WorkOrderStatus.INSPECTING:
+            transition_work_order(
+                session,
+                work_order,
+                WorkOrderStatus.CREATED,
+                payload.actor_id,
+                f"视频检测失败，可重试：{error}",
+            )
         session.commit()
         raise HTTPException(status_code=422, detail=str(error)) from error
 

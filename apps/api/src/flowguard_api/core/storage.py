@@ -17,6 +17,10 @@ class FileStorage(Protocol):
 
     def get(self, key: str) -> bytes: ...
 
+    def exists(self, key: str) -> bool: ...
+
+    def delete(self, key: str) -> None: ...
+
 
 class PublicFileStorage(FileStorage, Protocol):
     def get_url(self, key: str, expires_seconds: int = 900) -> str: ...
@@ -27,4 +31,3 @@ def sanitize_filename(filename: str) -> str:
 
     safe_name = SAFE_FILENAME.sub("_", Path(filename).name).strip("._")
     return safe_name or "document"
-

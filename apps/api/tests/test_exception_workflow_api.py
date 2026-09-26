@@ -87,11 +87,18 @@ def test_exception_rework_and_release_flow(client: TestClient, session: Session)
         files={"file": ("rework-normal.mp4", BytesIO(b"fixed"), "video/mp4")},
     )
     assert rework_video.status_code == 201
+    persisted_video_id = rework_video.json()["id"]
+    listed_videos = client.get(f"/api/v1/work-orders/{work_order_id}/videos")
+    assert listed_videos.status_code == 200
+    assert listed_videos.json()[0]["id"] == persisted_video_id
+    refreshed_exception = client.get("/api/v1/exceptions").json()[0]
+    assert refreshed_exception["status"] == "REWORK_SUBMITTED"
+    assert refreshed_exception["reworkTask"]["status"] == "SUBMITTED"
     reviewed = client.post(
         f"/api/v1/rework-tasks/{task_id}/review",
         json={
             "actorId": "quality-01",
-            "videoId": rework_video.json()["id"],
+            "videoId": persisted_video_id,
             "notes": "返工视频步骤完整",
         },
     )

@@ -104,6 +104,13 @@ def extract_sop(
     document = session.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="文档不存在")
+    existing_version = session.scalar(
+        select(SopVersion.id).where(SopVersion.source_document_id == document.id)
+    )
+    if existing_version is not None:
+        # Extraction is intentionally idempotent: a repeated click or browser
+        # retry must not create another version for the same source document.
+        return get_sop_detail(session, existing_version)
     try:
         extracted = extractor.extract(document.filename, storage.get(document.storage_key))
     except DocumentExtractionError as error:
@@ -119,32 +126,32 @@ def extract_sop(
         version=extracted.version,
         status=SopStatus.DRAFT,
     )
-    session.add(version)
-    session.flush()
-    for step in extracted.steps:
-        session.add(
-            SopStep(
-                sop_version_id=version.id,
-                code=step.code,
-                sequence=step.sequence,
-                name=step.name,
-                required=step.required,
-                preconditions=step.preconditions,
-                evidence_requirements=step.evidence_requirements,
-                on_missing=step.on_missing,
-                source_refs=[
-                    {
-                        "file_id": document.id,
-                        "page": source.page,
-                        "paragraph": source.paragraph,
-                        "quote": source.quote,
-                    }
-                    for source in step.source_refs
-                ],
-            )
-        )
-    transition_sop(session, version, SopStatus.AI_EXTRACTED, payload.actor_id)
     try:
+        session.add(version)
+        session.flush()
+        for step in extracted.steps:
+            session.add(
+                SopStep(
+                    sop_version_id=version.id,
+                    code=step.code,
+                    sequence=step.sequence,
+                    name=step.name,
+                    required=step.required,
+                    preconditions=step.preconditions,
+                    evidence_requirements=step.evidence_requirements,
+                    on_missing=step.on_missing,
+                    source_refs=[
+                        {
+                            "file_id": document.id,
+                            "page": source.page,
+                            "paragraph": source.paragraph,
+                            "quote": source.quote,
+                        }
+                        for source in step.source_refs
+                    ],
+                )
+            )
+        transition_sop(session, version, SopStatus.AI_EXTRACTED, payload.actor_id)
         session.commit()
     except IntegrityError as error:
         session.rollback()
@@ -158,13 +165,13 @@ def read_sop_version(version_id: str, session: SessionDependency) -> SopVersionD
 
 
 @router.get("/sop-versions", response_model=list[SopVersionSummary])
-def list_sop_versions(session: SessionDependency) -> list[SopVersionSummary]:
-    versions = session.scalars(
-        select(SopVersion)
-        .options(selectinload(SopVersion.sop))
-        .where(SopVersion.status == SopStatus.PUBLISHED)
-        .order_by(SopVersion.created_at.desc())
-    ).all()
+def list_sop_versions(
+    session: SessionDependency, include_unpublished: bool = False
+) -> list[SopVersionSummary]:
+    query = select(SopVersion).options(selectinload(SopVersion.sop))
+    if not include_unpublished:
+        query = query.where(SopVersion.status == SopStatus.PUBLISHED)
+    versions = session.scalars(query.order_by(SopVersion.created_at.desc())).all()
     return [
         SopVersionSummary.model_validate(
             {

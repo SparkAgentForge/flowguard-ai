@@ -1,17 +1,26 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from flowguard_api.core.storage import FileStorage
 from flowguard_api.infrastructure.database import get_session
+from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import AuditEvent, WorkOrder
 from flowguard_api.schemas import (
     WorkOrderCreate,
+    WorkOrderDeleteRequest,
     WorkOrderDetail,
     WorkOrderRead,
     WorkOrderTransition,
+)
+from flowguard_api.services.work_order_deletion import (
+    WorkOrderDeleteConfirmationError,
+    WorkOrderDeletionBlocked,
+    WorkOrderNotFoundError,
+    delete_work_order,
 )
 from flowguard_api.services.work_order_state import (
     InvalidWorkOrderTransition,
@@ -20,6 +29,7 @@ from flowguard_api.services.work_order_state import (
 
 router = APIRouter(prefix="/work-orders", tags=["work orders"])
 SessionDependency = Annotated[Session, Depends(get_session)]
+StorageDependency = Annotated[FileStorage, Depends(get_file_storage)]
 
 
 @router.get("", response_model=list[WorkOrderRead])
@@ -51,6 +61,30 @@ def get_work_order(work_order_id: str, session: SessionDependency) -> WorkOrderD
         .order_by(AuditEvent.created_at)
     ).all()
     return WorkOrderDetail.model_validate({**work_order.__dict__, "events": events})
+
+
+@router.delete("/{work_order_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete(
+    work_order_id: str,
+    payload: WorkOrderDeleteRequest,
+    session: SessionDependency,
+    storage: StorageDependency,
+) -> Response:
+    try:
+        delete_work_order(
+            session,
+            storage,
+            work_order_id,
+            payload.actor_id,
+            payload.confirmation,
+        )
+    except WorkOrderNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except WorkOrderDeleteConfirmationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except WorkOrderDeletionBlocked as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{work_order_id}/transitions", response_model=WorkOrderDetail)

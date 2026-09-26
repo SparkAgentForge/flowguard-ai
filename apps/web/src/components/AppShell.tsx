@@ -49,17 +49,9 @@ export function AppShell() {
           <span>GitHub 仓库</span>
           <span aria-hidden="true" className="external-mark">↗</span>
         </a>
-        <section className="station-panel" aria-label="当前工位">
-          <div className="station-panel__heading"><span className="live-indicator" />工位在线</div>
-          <strong>泵体端盖 · A-03</strong><span>最后同步 16:42</span>
-          <svg aria-hidden="true" viewBox="0 0 180 36">
-            <path d="M2 25h18l7-12 12 18 13-8 11 2 13-17 12 20 12-9 16 5 12-13 13 14 15-5 22 2" />
-          </svg>
-        </section>
         <div className="user-summary">
           <span className="avatar">质</span>
-          <span><strong>质量演示账号</strong><small>质检员</small></span>
-          <button aria-label="切换角色" className="icon-button" type="button"><Icon name="switch" /></button>
+          <span><strong>质量工作台</strong><small>演示环境</small></span>
         </div>
       </aside>
       <div className="page-frame">
@@ -68,7 +60,7 @@ export function AppShell() {
             <BrandMark /><strong>FlowGuard</strong>
           </NavLink>
           <div className="mobile-header__actions">
-            <span className="mobile-role">质检员</span>
+            <span className="mobile-role">演示环境</span>
             <a
               aria-label="在新标签页打开 FlowGuard AI GitHub 仓库"
               className="mobile-repository-link"

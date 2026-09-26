@@ -13,6 +13,14 @@ class LocalFileStorage:
     def get(self, key: str) -> bytes:
         return self._resolve(key).read_bytes()
 
+    def exists(self, key: str) -> bool:
+        return self._resolve(key).is_file()
+
+    def delete(self, key: str) -> None:
+        # Deletion is intentionally idempotent so a retry can clean up after a
+        # partially completed request without turning a missing object into an error.
+        self._resolve(key).unlink(missing_ok=True)
+
     def get_url(self, key: str, expires_seconds: int = 900) -> str:
         raise RuntimeError("本地文件存储没有可供 Step 5 访问的 HTTP URL")
 
@@ -76,6 +84,20 @@ class S3FileStorage:
     def get(self, key: str) -> bytes:
         self._ensure_bucket()
         return self._client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+
+    def exists(self, key: str) -> bool:
+        self._ensure_bucket()
+        try:
+            self._client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except self._client_error as error:
+            if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+
+    def delete(self, key: str) -> None:
+        self._ensure_bucket()
+        self._client.delete_object(Bucket=self.bucket, Key=key)
 
     def get_url(self, key: str, expires_seconds: int = 900) -> str:
         self._ensure_bucket()

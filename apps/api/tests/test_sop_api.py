@@ -111,6 +111,10 @@ def test_sop_review_and_publish_flow(client: TestClient, session: Session, tmp_p
     extracted = upload_and_extract(client)
 
     assert extracted["status"] == "AI_EXTRACTED"
+    assert client.get("/api/v1/sop-versions").json() == []
+    assert [item["id"] for item in client.get(
+        "/api/v1/sop-versions?include_unpublished=true"
+    ).json()] == [extracted["id"]]
     assert len(extracted["steps"]) == 4
     assert extracted["name"] == "服务器风扇安装"
     assert extracted["steps"][0]["name"] == "安装第一个风扇"
@@ -147,6 +151,33 @@ def test_sop_review_and_publish_flow(client: TestClient, session: Session, tmp_p
         "APPROVED",
         "PUBLISHED",
     ]
+
+
+def test_document_extraction_is_idempotent(client: TestClient, tmp_path: Path) -> None:
+    client.app.dependency_overrides[get_file_storage] = lambda: LocalFileStorage(str(tmp_path))
+    uploaded = client.post(
+        "/api/v1/documents",
+        files={
+            "file": (
+                "服务器风扇安装.docx",
+                manual_docx(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    document_id = uploaded.json()["id"]
+
+    first = client.post(
+        f"/api/v1/documents/{document_id}/extract", json={"actorId": "engineer-01"}
+    )
+    second = client.post(
+        f"/api/v1/documents/{document_id}/extract", json={"actorId": "engineer-02"}
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["status"] == "AI_EXTRACTED"
 
 
 def test_document_extraction_rejects_unreadable_manual(client: TestClient, tmp_path: Path) -> None:

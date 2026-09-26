@@ -34,6 +34,11 @@ class WorkOrderTransition(ApiModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class WorkOrderDeleteRequest(ApiModel):
+    actor_id: str = Field(min_length=1, max_length=100)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
 class WorkOrderRead(ApiModel):
     id: str
     code: str
@@ -142,6 +147,7 @@ class SopVersionDetail(ApiModel):
 class VideoRead(ApiModel):
     id: str
     work_order_id: str
+    rework_task_id: str | None = None
     filename: str
     content_type: str
     sha256: str
@@ -171,8 +177,8 @@ class ReviewRequestRead(ApiModel):
     id: str
     step_code: str
     step_name: str
-    start_seconds: int
-    end_seconds: int
+    start_seconds: int | None
+    end_seconds: int | None
     question: str
     reason: str
     status: str

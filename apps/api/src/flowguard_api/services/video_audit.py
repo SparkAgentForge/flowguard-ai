@@ -107,6 +107,10 @@ def execute_video_audit(
             continue
         if not step.required and not finding.detected:
             evidence_status = "SKIPPED"
+        # An uncertain observation must not look like a confirmed cut in the
+        # audit timeline. Targeted review requests keep the original evidence
+        # point separately when one exists.
+        display_times = evidence_status != "UNCERTAIN"
         audit.findings.append(
             AuditFinding(
                 sop_step_id=step.id,
@@ -123,10 +127,10 @@ def execute_video_audit(
                 occluded=finding.occluded,
                 chunk_idx=finding.chunk_idx,
                 cv_boundary_score=finding.cv_boundary_score,
-                start_seconds=finding.start_seconds,
-                end_seconds=finding.end_seconds,
+                start_seconds=finding.start_seconds if display_times else None,
+                end_seconds=finding.end_seconds if display_times else None,
                 evidence=finding.evidence,
-                frame_timestamps=finding.frame_timestamps,
+                frame_timestamps=finding.frame_timestamps if display_times else [],
             )
         )
     session.add(audit)

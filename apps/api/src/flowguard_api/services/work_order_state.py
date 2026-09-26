@@ -9,8 +9,10 @@ class InvalidWorkOrderTransition(ValueError):
 
 ALLOWED_TRANSITIONS: dict[WorkOrderStatus, frozenset[WorkOrderStatus]] = {
     WorkOrderStatus.CREATED: frozenset({WorkOrderStatus.INSPECTING}),
+    # A provider failure must release the work order so the operator can retry.
+    # This is a technical recovery transition, not a quality decision.
     WorkOrderStatus.INSPECTING: frozenset(
-        {WorkOrderStatus.VERIFIED, WorkOrderStatus.EXCEPTION_PENDING}
+        {WorkOrderStatus.CREATED, WorkOrderStatus.VERIFIED, WorkOrderStatus.EXCEPTION_PENDING}
     ),
     WorkOrderStatus.VERIFIED: frozenset({WorkOrderStatus.ARCHIVED}),
     WorkOrderStatus.EXCEPTION_PENDING: frozenset(
