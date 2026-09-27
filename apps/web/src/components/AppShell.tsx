@@ -1,4 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useState } from 'react'
+import { Pin, PinOff } from 'lucide-react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
 import { BrandMark, Icon, type IconName } from './Icons'
 
@@ -9,15 +11,17 @@ const navigation: NavigationItem[] = [
   { label: 'SOP 中心', path: '/sops', icon: 'document', mobile: true },
   { label: '工单中心', path: '/work-orders', icon: 'workOrder', mobile: true },
   { label: '异常处置', path: '/exceptions', icon: 'alert', mobile: true },
-  { label: '证据归档', path: '/reports', icon: 'archive', mobile: false },
+  { label: '证据归档', path: '/reports', icon: 'archive', mobile: true },
 ]
 
-function NavigationLink({ item }: { item: NavigationItem }) {
+function NavigationLink({ item, collapsed = false }: { item: NavigationItem; collapsed?: boolean }) {
   return (
     <NavLink
       className={({ isActive }) => `navigation-link${isActive ? ' is-active' : ''}`}
       end={item.path === '/'}
       to={item.path}
+      aria-label={item.label}
+      title={collapsed ? item.label : undefined}
     >
       <Icon name={item.icon} />
       <span>{item.label}</span>
@@ -26,21 +30,50 @@ function NavigationLink({ item }: { item: NavigationItem }) {
 }
 
 export function AppShell() {
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem('flowguard-sidebar-pinned') === 'true' }
+    catch { return false }
+  })
+  const [hovered, setHovered] = useState(false)
+  const [keyboardFocus, setKeyboardFocus] = useState(false)
+  const collapsed = !pinned && !hovered && !keyboardFocus
+
+  function togglePinned() {
+    const next = !pinned
+    setPinned(next)
+    try { localStorage.setItem('flowguard-sidebar-pinned', String(next)) }
+    catch { /* Pinning still works when browser storage is unavailable. */ }
+  }
+  const { pathname } = useLocation()
+  const pageTitle = navigation.find((item) => item.path === pathname)?.label ?? '质量工作台'
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${!pinned ? ' sidebar-auto' : ''}${collapsed ? ' sidebar-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
-      <aside className="sidebar">
+      <aside
+        className="sidebar"
+        id="workspace-sidebar"
+        onPointerEnter={(event) => { if (event.pointerType !== 'touch') setHovered(true) }}
+        onPointerLeave={() => setHovered(false)}
+        onPointerDown={() => setKeyboardFocus(false)}
+        onFocusCapture={(event) => { if (event.target.matches(':focus-visible')) setKeyboardFocus(true) }}
+        onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setKeyboardFocus(false) }}
+      >
         <NavLink className="brand" to="/" aria-label="FlowGuard AI 首页">
           <BrandMark />
-          <span><strong>FlowGuard</strong><small>装配审计系统</small></span>
+          <span><strong>FlowGuard</strong></span>
         </NavLink>
+        <button className="sidebar-pin" type="button" onClick={togglePinned} aria-label={pinned ? '取消固定侧边栏' : '固定侧边栏'} title={pinned ? '取消固定侧边栏' : '固定侧边栏'} aria-pressed={pinned}>
+          {pinned ? <PinOff size={17} /> : <Pin size={17} />}
+          <span>{pinned ? '已固定' : '固定侧边栏'}</span>
+        </button>
         <nav className="desktop-navigation" aria-label="主要导航">
-          <p className="navigation-label">质量工作台</p>
-          {navigation.map((item) => <NavigationLink item={item} key={item.path} />)}
+          {navigation.map((item) => <NavigationLink item={item} key={item.path} collapsed={collapsed} />)}
         </nav>
         <a
           aria-label="在新标签页打开 FlowGuard AI GitHub 仓库"
           className="repository-link"
+          title={collapsed ? 'GitHub 仓库' : undefined}
           href="https://github.com/SparkAgentForge/flowguard-ai"
           rel="noopener noreferrer"
           target="_blank"
@@ -49,12 +82,14 @@ export function AppShell() {
           <span>GitHub 仓库</span>
           <span aria-hidden="true" className="external-mark">↗</span>
         </a>
-        <div className="user-summary">
-          <span className="avatar">质</span>
-          <span><strong>质量工作台</strong><small>演示环境</small></span>
-        </div>
       </aside>
       <div className="page-frame">
+        <header className="workspace-header">
+          <div className="workspace-header__navigation">
+            <span>{pageTitle}</span>
+          </div>
+          <span className="environment-label">演示环境</span>
+        </header>
         <header className="mobile-header">
           <NavLink className="brand" to="/" aria-label="FlowGuard AI 首页">
             <BrandMark /><strong>FlowGuard</strong>

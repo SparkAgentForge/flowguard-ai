@@ -8,6 +8,13 @@ export const workOrderStatusLabels: Record<string, string> = {
   RELEASED: '已放行', ARCHIVED: '已归档',
 }
 
+export function workOrderStatusTone(status: string) {
+  if (['VERIFIED', 'RELEASED', 'ARCHIVED', 'EXCEPTION_REJECTED'].includes(status)) return 'success' as const
+  if (['EXCEPTION_PENDING', 'EXCEPTION_CONFIRMED'].includes(status)) return 'danger' as const
+  if (['CREATED', 'INSPECTING'].includes(status)) return 'neutral' as const
+  return 'warning' as const
+}
+
 export const auditDecisionLabels: Record<VideoAudit['decision'], string> = {
   PASS: '合规通过', VIOLATION: '发现违规', INSUFFICIENT_EVIDENCE: '证据不足',
 }
