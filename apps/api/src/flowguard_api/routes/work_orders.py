@@ -20,6 +20,7 @@ from flowguard_api.services.work_order_deletion import (
     WorkOrderDeleteConfirmationError,
     WorkOrderDeletionBlocked,
     WorkOrderNotFoundError,
+    WorkOrderStorageDeletionError,
     delete_work_order,
 )
 from flowguard_api.services.work_order_state import (
@@ -84,6 +85,8 @@ def delete(
         raise HTTPException(status_code=400, detail=str(error)) from error
     except WorkOrderDeletionBlocked as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except WorkOrderStorageDeletionError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

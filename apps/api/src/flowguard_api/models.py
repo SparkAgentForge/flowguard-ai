@@ -57,6 +57,7 @@ class WorkOrderStatus(StrEnum):
 
 
 class VideoAuditStatus(StrEnum):
+    PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -232,8 +233,11 @@ class AuditFinding(Base):
     cv_boundary_score: Mapped[float | None] = mapped_column(nullable=True)
     start_seconds: Mapped[int | None] = mapped_column(Integer)
     end_seconds: Mapped[int | None] = mapped_column(Integer)
+    candidate_start_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    candidate_end_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence: Mapped[str] = mapped_column(Text)
     frame_timestamps: Mapped[list[int]] = mapped_column(JSON, default=list)
+    candidate_frame_timestamps: Mapped[list[int]] = mapped_column(JSON, default=list)
     audit: Mapped[VideoAudit] = relationship(back_populates="findings")
 
 

@@ -29,7 +29,8 @@ schemas. Save IDs from each response; do not use example UUIDs.
 ## Provider checks
 
 For `mock`, use the repository's deterministic filename fixtures. For `stepfun`,
-verify RustFS object keys and Step 5-reachable presigned URLs. For `deepstream`,
+verify RustFS object keys and Base64 data URLs without storing image bytes in
+the audit record. For `deepstream`,
 verify the official service response includes chunk metadata and that FlowGuard
 stores chunk fields in findings before the execution graph evaluates them.
 
@@ -43,4 +44,3 @@ For every failed stage record:
 - created object keys or database IDs;
 - root cause and narrow correction;
 - second-run result and cleanup status.
-

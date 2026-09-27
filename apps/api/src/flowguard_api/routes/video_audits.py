@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -15,8 +15,10 @@ from flowguard_api.infrastructure.database import get_session
 from flowguard_api.infrastructure.storage.factory import get_file_storage
 from flowguard_api.models import (
     AuditDecision,
+    AuditFinding,
     ExceptionCase,
     ExceptionStatus,
+    SopStep,
     VideoAsset,
     VideoAudit,
     VideoAuditStatus,
@@ -31,6 +33,7 @@ from flowguard_api.schemas import (
     VideoAuditRequest,
     VideoRead,
 )
+from flowguard_api.services.evidence_clips import evidence_clip_key
 from flowguard_api.services.video_audit import InvalidVideoAudit, execute_video_audit
 from flowguard_api.services.video_preview import VideoPreviewError, ensure_browser_preview
 from flowguard_api.services.work_order_state import transition_work_order
@@ -56,9 +59,19 @@ def _get_audit_detail(session: Session, audit_id: str) -> VideoAuditRead:
     )
     if audit is None:
         raise HTTPException(status_code=404, detail="视频审计不存在")
-    return VideoAuditRead.model_validate(
-        {**audit.__dict__, "findings": sorted(audit.findings, key=lambda item: item.sequence)}
-    )
+    findings = [
+        {
+            **finding.__dict__,
+            "has_confirmed_clip": evidence_clip_key(
+                audit.raw_response or {}, finding.sop_step_id, "confirmed"
+            ) is not None,
+            "has_candidate_clip": evidence_clip_key(
+                audit.raw_response or {}, finding.sop_step_id, "candidate"
+            ) is not None,
+        }
+        for finding in sorted(audit.findings, key=lambda item: item.sequence)
+    ]
+    return VideoAuditRead.model_validate({**audit.__dict__, "findings": findings})
 
 
 @router.get("/{work_order_id}/audits", response_model=list[VideoAuditRead])
@@ -182,6 +195,16 @@ def inspect_video(
     )
     if existing is not None and existing.status == VideoAuditStatus.COMPLETED:
         return _get_audit_detail(session, existing.id)
+    if existing is not None and existing.status == VideoAuditStatus.PROCESSING:
+        return _get_audit_detail(session, existing.id)
+    active = session.scalar(
+        select(VideoAudit.id).where(
+            VideoAudit.work_order_id == work_order_id,
+            VideoAudit.status == VideoAuditStatus.PROCESSING,
+        )
+    )
+    if active is not None:
+        raise HTTPException(status_code=409, detail="该工作单已有正在进行的视频审计")
     if work_order.status == WorkOrderStatus.CREATED:
         transition_work_order(
             session, work_order, WorkOrderStatus.INSPECTING, payload.actor_id, "开始视频检测"
@@ -189,21 +212,39 @@ def inspect_video(
     elif work_order.status != WorkOrderStatus.INSPECTING:
         raise HTTPException(status_code=409, detail="当前工作单状态不允许重新检测")
 
+    audit = VideoAudit(
+        work_order_id=work_order.id,
+        video_id=video.id,
+        status=VideoAuditStatus.PROCESSING,
+        decision=AuditDecision.INSUFFICIENT_EVIDENCE,
+        provider=get_settings().inference_provider,
+        model_name=get_settings().stepfun_model,
+        overall_pass=False,
+        summary="视频已上传，正在进行视觉分析…",
+        raw_response={"status": "PROCESSING"},
+        execution_trace={},
+        review_requests=[],
+    )
+    session.add(audit)
+    # Commit the durable progress marker before the potentially long provider
+    # request. A browser refresh or disconnected client must not hide the job.
+    session.commit()
+    session.refresh(audit)
+
     try:
-        audit = execute_video_audit(session, work_order, video, storage)
+        audit = execute_video_audit(session, work_order, video, storage, audit=audit)
     except (InvalidVideoAudit, VideoInferenceError) as error:
-        audit = VideoAudit(
-            work_order_id=work_order_id,
-            video_id=video.id,
-            status=VideoAuditStatus.FAILED,
-            decision=AuditDecision.VIOLATION,
-            provider=get_settings().inference_provider,
-            model_name="unknown",
-            overall_pass=False,
-            summary=str(error),
-            raw_response={"error": str(error)},
-        )
-        session.add(audit)
+        session.rollback()
+        audit = session.get(VideoAudit, audit.id)
+        work_order = session.get(WorkOrder, work_order_id)
+        audit.status = VideoAuditStatus.FAILED
+        audit.decision = AuditDecision.VIOLATION
+        audit.model_name = "unknown"
+        audit.overall_pass = False
+        audit.summary = str(error)
+        audit.raw_response = {"error": str(error)}
+        audit.execution_trace = {}
+        audit.review_requests = []
         # Do not leave the work order in INSPECTING after a provider or media
         # failure. The uploaded video remains available for a retry.
         if work_order.status == WorkOrderStatus.INSPECTING:
@@ -216,6 +257,31 @@ def inspect_video(
             )
         session.commit()
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        # A provider/storage/database exception must not leave a durable job
+        # looking active forever. Keep details in server logs, not the API.
+        session.rollback()
+        audit = session.get(VideoAudit, audit.id)
+        work_order = session.get(WorkOrder, work_order_id)
+        audit.status = VideoAuditStatus.FAILED
+        audit.decision = AuditDecision.VIOLATION
+        audit.overall_pass = False
+        audit.summary = "视频检测意外失败，请检查服务日志后重试"
+        audit.raw_response = {"error": "INTERNAL_ERROR"}
+        audit.execution_trace = {}
+        audit.review_requests = []
+        if work_order.status == WorkOrderStatus.INSPECTING:
+            transition_work_order(
+                session,
+                work_order,
+                WorkOrderStatus.CREATED,
+                payload.actor_id,
+                "视频检测意外失败，可重试",
+            )
+        session.commit()
+        raise HTTPException(
+            status_code=500, detail="视频检测意外失败，请检查服务日志后重试"
+        ) from error
 
     if audit.decision == AuditDecision.PASS:
         transition_work_order(
@@ -273,6 +339,57 @@ def read_video_audit(
     if audit is None:
         raise HTTPException(status_code=404, detail="视频审计不存在")
     return _get_audit_detail(session, audit.id)
+
+
+@router.get("/{work_order_id}/audits/{audit_id}/findings/{step_ref}/clip")
+def evidence_clip(
+    work_order_id: str,
+    audit_id: str,
+    step_ref: str,
+    session: SessionDependency,
+    storage: StorageDependency,
+    kind: str = Query(default="confirmed", pattern="^(confirmed|candidate)$"),
+) -> Response:
+    """Stream a generated finding clip without exposing RustFS credentials."""
+    audit = session.scalar(
+        select(VideoAudit).where(
+            VideoAudit.id == audit_id, VideoAudit.work_order_id == work_order_id
+        )
+    )
+    if audit is None:
+        raise HTTPException(status_code=404, detail="视频审计不存在")
+    video = session.scalar(
+        select(VideoAsset).where(
+            VideoAsset.id == audit.video_id, VideoAsset.work_order_id == work_order_id
+        )
+    )
+    if video is None:
+        raise HTTPException(status_code=404, detail="审计视频不存在")
+    # The API path uses a step code, while the persisted clip key uses the
+    # stable step id.
+    finding = session.scalar(
+        select(AuditFinding)
+        .join(SopStep, SopStep.id == AuditFinding.sop_step_id)
+        .where(AuditFinding.audit_id == audit_id, SopStep.code == step_ref)
+    )
+    if finding is None:
+        finding = session.scalar(
+            select(AuditFinding).where(
+                AuditFinding.audit_id == audit_id, AuditFinding.sop_step_id == step_ref
+            )
+        )
+    if finding is None:
+        raise HTTPException(status_code=404, detail="步骤证据不存在")
+    key = evidence_clip_key(audit.raw_response or {}, finding.sop_step_id, kind)
+    if not key:
+        raise HTTPException(status_code=404, detail="该步骤没有可播放的证据片段")
+    try:
+        return RedirectResponse(storage.get_url(key, expires_seconds=3600))
+    except RuntimeError:
+        try:
+            return Response(content=storage.get(key), media_type="video/mp4")
+        except Exception as error:
+            raise HTTPException(status_code=404, detail="证据片段不存在") from error
 
 
 @router.get(

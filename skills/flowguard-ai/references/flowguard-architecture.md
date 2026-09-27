@@ -26,7 +26,7 @@ routes -> services/application -> core contracts
 | Provider | Input | Owns | Selected by |
 | --- | --- | --- | --- |
 | `mock` | non-empty video bytes | deterministic demo findings | default local demo |
-| `stepfun` | RustFS presigned frame URLs | Step 5 visual observations | `FLOWGUARD_INFERENCE_PROVIDER=stepfun` |
+| `stepfun` | RustFS-stored frames sent as base64 data URLs | Step 5 visual observations | `FLOWGUARD_INFERENCE_PROVIDER=stepfun` |
 | `deepstream` | uploaded video file ID | GEBD/DDM chunks and VLM observations | `FLOWGUARD_INFERENCE_PROVIDER=deepstream` |
 
 All providers return the `InferenceResult` contract. The audit service then
@@ -45,7 +45,7 @@ retain model/provider metadata and evidence references.
 
 ## Current project facts
 
-- The production database is PostgreSQL; do not introduce a SQLite fallback.
+- PostgreSQL is the only supported database for the application and tests.
 - RustFS is the object-storage system for manuals, frames, videos, and report
   artifacts.
 - `compose.yaml` starts API, Web, PostgreSQL, RustFS, and its permissions job;
@@ -53,4 +53,3 @@ retain model/provider metadata and evidence references.
 - The server's current deployment uses Step 5 unless its environment is
   explicitly changed. A separate Step1X-3D service is unrelated to this
   architecture.
-

@@ -14,6 +14,7 @@ from flowguard_api.models import (
     VideoAuditStatus,
     WorkOrder,
 )
+from flowguard_api.services.evidence_clips import EvidenceClipError, generate_evidence_clips
 from flowguard_api.services.execution_graph import (
     compile_execution_graph,
     evaluate_evidence,
@@ -30,6 +31,7 @@ def execute_video_audit(
     work_order: WorkOrder,
     video: VideoAsset,
     storage: FileStorage,
+    audit: VideoAudit | None = None,
 ) -> VideoAudit:
     version = session.scalar(
         select(SopVersion)
@@ -41,7 +43,7 @@ def execute_video_audit(
     if version.status != SopStatus.PUBLISHED:
         raise InvalidVideoAudit("只有已发布的 SOP 才能用于视频检测")
 
-    result = get_video_inference_adapter(storage).analyze(
+    result = get_video_inference_adapter(storage, work_order_id=work_order.id).analyze(
         video.filename, storage.get(video.storage_key), list(version.steps)
     )
     evaluation = evaluate_evidence(
@@ -63,22 +65,37 @@ def execute_video_audit(
     for code in evaluation.uncertain_steps:
         status_by_code[code] = "UNCERTAIN"
 
-    audit = VideoAudit(
-        work_order_id=work_order.id,
-        video_id=video.id,
-        status=VideoAuditStatus.COMPLETED,
-        decision=decision,
-        provider=result.provider,
-        model_name=result.model_name,
-        overall_pass=evaluation.overall_pass,
-        summary=evaluation.summary,
-        raw_response={
+    if audit is None:
+        audit = VideoAudit(
+            work_order_id=work_order.id,
+            video_id=video.id,
+            status=VideoAuditStatus.COMPLETED,
+            decision=decision,
+            provider=result.provider,
+            model_name=result.model_name,
+            overall_pass=evaluation.overall_pass,
+            summary=evaluation.summary,
+            raw_response={
+                **result.raw_response,
+                "flowguard_evaluation": execution_trace,
+            },
+            execution_trace=execution_trace,
+            review_requests=evaluation.review_requests,
+        )
+        session.add(audit)
+    else:
+        audit.status = VideoAuditStatus.COMPLETED
+        audit.decision = decision
+        audit.provider = result.provider
+        audit.model_name = result.model_name
+        audit.overall_pass = evaluation.overall_pass
+        audit.summary = evaluation.summary
+        audit.raw_response = {
             **result.raw_response,
             "flowguard_evaluation": execution_trace,
-        },
-        execution_trace=execution_trace,
-        review_requests=evaluation.review_requests,
-    )
+        }
+        audit.execution_trace = execution_trace
+        audit.review_requests = evaluation.review_requests
     steps_by_code = {step.code: step for step in version.steps}
     unknown_codes = set(finding.step_code for finding in result.findings) - set(steps_by_code)
     if unknown_codes:
@@ -108,9 +125,10 @@ def execute_video_audit(
         if not step.required and not finding.detected:
             evidence_status = "SKIPPED"
         # An uncertain observation must not look like a confirmed cut in the
-        # audit timeline. Targeted review requests keep the original evidence
-        # point separately when one exists.
+        # audit timeline. Keep its candidate range separately for targeted
+        # review and clip playback.
         display_times = evidence_status != "UNCERTAIN"
+        candidate_evidence = evidence_status in {"UNCERTAIN", "MISSING", "MISORDERED"}
         audit.findings.append(
             AuditFinding(
                 sop_step_id=step.id,
@@ -129,10 +147,42 @@ def execute_video_audit(
                 cv_boundary_score=finding.cv_boundary_score,
                 start_seconds=finding.start_seconds if display_times else None,
                 end_seconds=finding.end_seconds if display_times else None,
+                candidate_start_seconds=(
+                    finding.candidate_start_seconds
+                    if candidate_evidence
+                    else None
+                ),
+                candidate_end_seconds=(
+                    finding.candidate_end_seconds if candidate_evidence else None
+                ),
                 evidence=finding.evidence,
                 frame_timestamps=finding.frame_timestamps if display_times else [],
+                candidate_frame_timestamps=(
+                    (finding.candidate_frame_timestamps or finding.frame_timestamps)
+                    if candidate_evidence
+                    else []
+                ),
             )
         )
-    session.add(audit)
+    session.flush()
+    clip_error: str | None = None
+    try:
+        evidence_clips = generate_evidence_clips(
+            storage=storage,
+            video=video,
+            audit_id=audit.id,
+            findings=audit.findings,
+        )
+    except EvidenceClipError as error:
+        # An audit remains valid when a demo/mock video cannot be transcoded;
+        # the finding timeline is still usable and the error is visible for
+        # operators. Real Step 5 audits normally produce clips here.
+        evidence_clips = {}
+        clip_error = str(error)
+    audit.raw_response = {
+        **audit.raw_response,
+        "evidence_clips": evidence_clips,
+        **({"evidence_clip_error": clip_error} if clip_error else {}),
+    }
     session.flush()
     return audit

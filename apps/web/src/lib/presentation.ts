@@ -13,7 +13,7 @@ export const auditDecisionLabels: Record<VideoAudit['decision'], string> = {
 }
 
 export const auditStatusLabels: Record<VideoAudit['status'], string> = {
-  COMPLETED: '检测完成', FAILED: '检测失败',
+  PROCESSING: '检测中', COMPLETED: '检测完成', FAILED: '检测失败',
 }
 
 export const evidenceStatusLabels: Record<AuditFinding['evidenceStatus'], string> = {

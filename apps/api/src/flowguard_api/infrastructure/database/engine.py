@@ -1,13 +1,15 @@
 """SQLAlchemy engine construction."""
 
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.engine import make_url
 
 
 def create_database_engine(database_url: str) -> Engine:
-    """Create an engine with settings suitable for SQLite and PostgreSQL."""
+    """Create a PostgreSQL engine for the configured application database."""
 
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
+    if make_url(database_url).get_backend_name() != "postgresql":
+        raise ValueError("FLOWGUARD_DATABASE_URL must use a PostgreSQL SQLAlchemy URL")
+    return create_engine(database_url, pool_pre_ping=True)
 
 
 def _configured_engine() -> Engine:
@@ -19,4 +21,3 @@ def _configured_engine() -> Engine:
 
 
 engine = _configured_engine()
-

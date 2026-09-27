@@ -184,7 +184,7 @@ def test_failed_inspection_releases_work_order_and_is_visible(
     )
     video_id = uploaded.json()["id"]
 
-    def fail_adapter(storage):
+    def fail_adapter(storage, work_order_id=None):
         class Adapter:
             def analyze(self, filename, video, steps):
                 raise VideoInferenceError("Step 5 无法访问 RustFS 帧地址")

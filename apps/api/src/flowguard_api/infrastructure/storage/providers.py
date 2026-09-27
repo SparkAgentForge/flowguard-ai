@@ -16,13 +16,23 @@ class LocalFileStorage:
     def exists(self, key: str) -> bool:
         return self._resolve(key).is_file()
 
+    def list_prefix(self, prefix: str) -> list[str]:
+        target = self._resolve(prefix)
+        if not target.is_dir():
+            return []
+        return [
+            path.relative_to(self.root).as_posix()
+            for path in target.rglob("*")
+            if path.is_file()
+        ]
+
     def delete(self, key: str) -> None:
         # Deletion is intentionally idempotent so a retry can clean up after a
         # partially completed request without turning a missing object into an error.
         self._resolve(key).unlink(missing_ok=True)
 
     def get_url(self, key: str, expires_seconds: int = 900) -> str:
-        raise RuntimeError("本地文件存储没有可供 Step 5 访问的 HTTP URL")
+        raise RuntimeError("本地文件存储没有可供浏览器访问的 HTTP URL")
 
     def _resolve(self, key: str) -> Path:
         target = (self.root / key).resolve()
@@ -94,6 +104,13 @@ class S3FileStorage:
             if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
                 return False
             raise
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        self._ensure_bucket()
+        pages = self._client.get_paginator("list_objects_v2").paginate(
+            Bucket=self.bucket, Prefix=prefix
+        )
+        return [item["Key"] for page in pages for item in page.get("Contents", [])]
 
     def delete(self, key: str) -> None:
         self._ensure_bucket()

@@ -2,8 +2,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import StringConstraints
+from pydantic import StringConstraints, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 _CONFIG_PATH = Path(__file__).resolve()
 _REPOSITORY_ROOT = next(
@@ -49,7 +50,6 @@ class Settings(BaseSettings):
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com/v1"
     stepfun_model: str = "step-5-preview"
-    stepfun_frame_url_expires_seconds: int = 900
     stepfun_timeout_seconds: int = 180
     stepfun_steps_per_request: int = 10
     deepstream_base_url: str = "http://nvds-action-sop:8300"
@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     # Keep these separate so an old FLOWGUARD_FRAME_INTERVAL_SECONDS value
     # cannot silently turn an 80-second video into a handful of wide chunks.
     stepfun_frame_interval_seconds: float = 1.0
-    stepfun_max_video_frames: int = 20
+    stepfun_max_video_frames: int = 300
+    stepfun_analysis_window_seconds: int = 20
+    stepfun_analysis_window_overlap_seconds: int = 4
     frame_interval_seconds: int = 3
     max_video_frames: int = 20
     ffmpeg_binary: str = "ffmpeg"
@@ -71,6 +73,13 @@ class Settings(BaseSettings):
     upload_dir: str = "./data/uploads"
     max_upload_bytes: int = 20 * 1024 * 1024
     max_video_bytes: int = 500 * 1024 * 1024
+
+    @field_validator("database_url")
+    @classmethod
+    def require_postgresql_database(cls, database_url: str) -> str:
+        if make_url(database_url).get_backend_name() != "postgresql":
+            raise ValueError("FLOWGUARD_DATABASE_URL must use a PostgreSQL SQLAlchemy URL")
+        return database_url
 
 
 @lru_cache

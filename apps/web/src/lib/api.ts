@@ -67,8 +67,13 @@ export type AuditFinding = {
   cvBoundaryScore: number | null
   startSeconds: number | null
   endSeconds: number | null
+  candidateStartSeconds: number | null
+  candidateEndSeconds: number | null
   evidence: string
   frameTimestamps: number[]
+  candidateFrameTimestamps: number[]
+  hasConfirmedClip: boolean
+  hasCandidateClip: boolean
 }
 
 export type ReviewRequest = {
@@ -89,7 +94,7 @@ export type VideoAudit = {
   id: string
   workOrderId: string
   videoId: string
-  status: 'COMPLETED' | 'FAILED'
+  status: 'PROCESSING' | 'COMPLETED' | 'FAILED'
   decision: 'PASS' | 'VIOLATION' | 'INSUFFICIENT_EVIDENCE'
   provider: string
   modelName: string
@@ -146,7 +151,7 @@ export type Report = {
     outcome: string
     sop: { code: string | null; name: string | null; version: string | null; sourceDocumentSha256: string | null }
     videos: { id: string; filename: string; sha256: string; kind: string }[]
-    audits: { id: string; decision: string; provider: string; model: string; promptVersion: string; summary: string; executionTrace?: VideoAudit['executionTrace']; frameAssetKeys?: string[]; findings: AuditFinding[] }[]
+    audits: { id: string; decision: string; provider: string; model: string; promptVersion: string; summary: string; executionTrace?: VideoAudit['executionTrace']; frameAssetKeys?: string[]; evidenceClips?: Record<string, string>; findings: AuditFinding[] }[]
     humanDecision: { status: string; reason: string | null; reviewedBy: string | null } | null
     rework: { taskId: string; assigneeId: string; instructions: string; status: string; reviewedBy: string | null; reviewNotes: string | null } | null
   }
@@ -253,6 +258,15 @@ export function videoContentUrl(workOrderId: string, videoId: string): string {
   return `/api/v1/work-orders/${workOrderId}/videos/${videoId}/content`
 }
 
+export function evidenceClipUrl(
+  workOrderId: string,
+  auditId: string,
+  stepCode: string,
+  kind: 'confirmed' | 'candidate',
+): string {
+  return `/api/v1/work-orders/${workOrderId}/audits/${auditId}/findings/${encodeURIComponent(stepCode)}/clip?kind=${kind}`
+}
+
 export function createWorkOrder(payload: { code: string; productCode: string; sopVersionId: string }): Promise<WorkOrder> {
   return request<WorkOrder>('/work-orders', {
     method: 'POST',
@@ -269,10 +283,10 @@ export function deleteWorkOrder(workOrderId: string, actorId: string, confirmati
   })
 }
 
-export async function uploadVideo(workOrderId: string, file: File): Promise<{ id: string; filename: string }> {
+export async function uploadVideo(workOrderId: string, file: File): Promise<VideoAsset> {
   const body = new FormData()
   body.append('file', file)
-  return request<{ id: string; filename: string }>(`/work-orders/${workOrderId}/videos`, { method: 'POST', body })
+  return request<VideoAsset>(`/work-orders/${workOrderId}/videos`, { method: 'POST', body })
 }
 
 export function inspectVideo(workOrderId: string, videoId: string, actorId: string): Promise<VideoAudit> {

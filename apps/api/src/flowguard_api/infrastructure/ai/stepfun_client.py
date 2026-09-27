@@ -1,5 +1,6 @@
 """Small Step 5-compatible multimodal chat client shared by adapters."""
 
+import base64
 import json
 import re
 import urllib.error
@@ -18,6 +19,14 @@ class Step5VisionClient:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+
+    @staticmethod
+    def image_part(content: bytes, media_type: str) -> dict:
+        encoded = base64.b64encode(content).decode("ascii")
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+        }
 
     def chat(self, content: Sequence[dict], system_prompt: str) -> dict:
         if not self.settings.stepfun_api_key:
@@ -51,6 +60,10 @@ class Step5VisionClient:
             ) as response:
                 return json.loads(response.read())
         except urllib.error.HTTPError as error:
+            if error.code == 413:
+                raise VideoInferenceError(
+                    "Step 5 图片请求过大，请减少视频抽帧数量或降低 PDF 页图分辨率后重试"
+                ) from error
             detail = self._http_error_detail(error)
             suffix = f"：{detail}" if detail else ""
             raise VideoInferenceError(f"Step 5 返回 HTTP {error.code}{suffix}") from error
@@ -88,6 +101,11 @@ class Step5VisionClient:
         detail = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [REDACTED]", detail)
         if self.settings.stepfun_api_key:
             detail = detail.replace(self.settings.stepfun_api_key, "[REDACTED]")
+        detail = re.sub(
+            r"data:image/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+",
+            "[REDACTED IMAGE]",
+            detail,
+        )
         return detail[: self._MAX_ERROR_DETAIL_LENGTH]
 
     @classmethod

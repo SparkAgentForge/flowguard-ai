@@ -224,6 +224,10 @@ def evaluate_evidence(
 def _review_request(step: SopStep, finding: Any, reason: str) -> dict[str, Any]:
     start = finding.start_seconds
     end = finding.end_seconds
+    if start is None:
+        start = getattr(finding, "candidate_start_seconds", None)
+    if end is None:
+        end = getattr(finding, "candidate_end_seconds", None)
     return {
         "id": f"review-{step.code}-{start if start is not None else 'unknown'}",
         "step_code": step.code,

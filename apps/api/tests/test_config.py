@@ -28,3 +28,10 @@ def test_database_url_uses_explicit_configuration() -> None:
     database_url = "postgresql+pg8000://test:test@localhost:5432/test"
 
     assert Settings(database_url=database_url, _env_file=None).database_url == database_url
+
+
+def test_database_url_requires_postgresql() -> None:
+    with pytest.raises(ValidationError) as error:
+        Settings(database_url="mysql://test:test@localhost:3306/test", _env_file=None)
+
+    assert any(item["loc"] == ("database_url",) for item in error.value.errors())

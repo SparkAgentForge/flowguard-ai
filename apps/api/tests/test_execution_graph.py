@@ -176,6 +176,93 @@ def test_step5_overlapping_ranges_become_uncertain() -> None:
     assert evaluate_evidence(steps()[:2], normalized).decision == "INSUFFICIENT_EVIDENCE"
 
 
+def test_step5_keeps_early_action_candidate_over_late_repeated_step_match() -> None:
+    repeated_steps = [
+        SopStep(code="fan_01", sequence=1, name="安装第一个风扇", required=True),
+        SopStep(code="fan_02", sequence=2, name="安装第二个风扇", required=True),
+    ]
+    findings = [
+        InferenceFinding(
+            step_code="fan_01",
+            detected=False,
+            confidence=70,
+            start_seconds=None,
+            end_seconds=None,
+            evidence="有装配动作但无法确认是首个风扇",
+            frame_timestamps=[8, 9, 10, 11, 12, 13],
+            evidence_score=70,
+            candidate_frame_timestamps=[8, 9, 10, 11, 12, 13],
+            candidate_start_seconds=8,
+            candidate_end_seconds=13,
+        ),
+        InferenceFinding(
+            step_code="fan_01",
+            detected=True,
+            confidence=90,
+            start_seconds=80,
+            end_seconds=85,
+            evidence="双手在最下方风扇插槽安装并按压风扇",
+            frame_timestamps=[80, 81, 82, 83, 84, 85],
+            evidence_score=90,
+        ),
+        InferenceFinding(
+            step_code="fan_02",
+            detected=True,
+            confidence=90,
+            start_seconds=93,
+            end_seconds=98,
+            evidence="双手将风扇放入第二个插槽并按压到位",
+            frame_timestamps=[93, 94, 95, 96, 97, 98],
+            evidence_score=90,
+        ),
+    ]
+
+    merged = Step5InferenceAdapter._merge_window_findings(findings, repeated_steps)
+
+    first, second = merged
+    assert first.detected is False
+    assert first.start_seconds is None
+    assert first.candidate_start_seconds == 8
+    assert first.candidate_end_seconds == 13
+    assert first.confidence < 60
+    assert second.detected is True
+    assert second.start_seconds == 93
+
+
+def test_step5_does_not_treat_negative_timestamped_evidence_as_action_candidate() -> None:
+    repeated_step = SopStep(code="fan_01", sequence=1, name="安装第一个风扇", required=True)
+    findings = [
+        InferenceFinding(
+            step_code="fan_01",
+            detected=False,
+            confidence=95,
+            start_seconds=None,
+            end_seconds=None,
+            evidence="全程未出现风扇安装动作",
+            frame_timestamps=[8, 9, 10],
+            evidence_score=95,
+            candidate_frame_timestamps=[8, 9, 10],
+            candidate_start_seconds=8,
+            candidate_end_seconds=10,
+        ),
+        InferenceFinding(
+            step_code="fan_01",
+            detected=True,
+            confidence=90,
+            start_seconds=80,
+            end_seconds=85,
+            evidence="双手在风扇插槽安装并按压风扇",
+            frame_timestamps=[80, 81, 82, 83, 84, 85],
+            evidence_score=90,
+        ),
+    ]
+
+    merged = Step5InferenceAdapter._merge_window_findings(findings, [repeated_step])
+
+    assert merged[0].detected is True
+    assert merged[0].start_seconds == 80
+
+
 def test_frame_extractor_reports_missing_media_tools(monkeypatch) -> None:
     monkeypatch.setattr(
         "flowguard_api.infrastructure.ai.providers.get_settings",
@@ -237,24 +324,33 @@ def test_step5_empty_findings_are_retried_once(monkeypatch) -> None:
         adapter._parse({}, steps()[:2])
 
 
-def test_step5_rejects_local_rustfs_url_before_model_request(monkeypatch) -> None:
+def test_step5_does_not_need_public_rustfs_url(monkeypatch) -> None:
     class Storage:
         def put(self, key, content):
             pass
 
         def get_url(self, key, expires_seconds=900):
-            return f"http://127.0.0.1:9000/{key}"
+            raise AssertionError("Step 5 must not fetch RustFS URLs")
 
     adapter = Step5InferenceAdapter(Storage())
     adapter.settings.stepfun_api_key = "test-key"
     adapter.frame_extractor.extract = lambda video, suffix: [(0, b"jpeg")]
     monkeypatch.setattr(
-        adapter,
-        "_post_json",
-        lambda url, payload: (_ for _ in ()).throw(AssertionError("请求不应发出")),
+        adapter, "_post_json", lambda url, payload: {"choices": [{"message": {"content": "{}"}}]}
     )
 
-    with pytest.raises(VideoInferenceError, match="无法访问本机 RustFS"):
+    with pytest.raises(VideoInferenceError, match="未返回可用的步骤判断"):
+        adapter.analyze("video.mp4", b"video", steps()[:1])
+
+
+def test_step5_rejects_local_file_storage(tmp_path) -> None:
+    from flowguard_api.infrastructure.storage.providers import LocalFileStorage
+
+    adapter = Step5InferenceAdapter(LocalFileStorage(str(tmp_path)))
+    adapter.settings.stepfun_api_key = "test-key"
+    adapter.frame_extractor.extract = lambda video, suffix: [(0, b"jpeg")]
+
+    with pytest.raises(VideoInferenceError, match="RustFS 存储"):
         adapter.analyze("video.mp4", b"video", steps()[:1])
 
 
@@ -352,7 +448,7 @@ def test_deepstream_parser_maps_chunk_metadata_to_step_findings() -> None:
     assert result.findings[0].cv_boundary_score == 0.91
 
 
-def test_step5_sends_rustfs_frame_urls_instead_of_base64(monkeypatch) -> None:
+def test_step5_sends_stored_frames_as_base64(monkeypatch) -> None:
     class FrameStorage:
         def __init__(self) -> None:
             self.assets: dict[str, bytes] = {}
@@ -364,10 +460,10 @@ def test_step5_sends_rustfs_frame_urls_instead_of_base64(monkeypatch) -> None:
             return self.assets[key]
 
         def get_url(self, key: str, expires_seconds: int = 900) -> str:
-            return f"https://rustfs.example/{key}?expires={expires_seconds}"
+            raise AssertionError("Step 5 must not fetch RustFS URLs")
 
     storage = FrameStorage()
-    adapter = Step5InferenceAdapter(storage)
+    adapter = Step5InferenceAdapter(storage, work_order_id="order-1")
     adapter.settings.stepfun_api_key = "test-key"
     adapter.frame_extractor.extract = lambda video, suffix: [(3, b"jpeg-1"), (6, b"jpeg-2")]
     captured: dict = {}
@@ -395,11 +491,18 @@ def test_step5_sends_rustfs_frame_urls_instead_of_base64(monkeypatch) -> None:
         part for part in captured["messages"][1]["content"] if part.get("type") == "image_url"
     ]
     assert len(storage.assets) == 2
-    assert image_parts and all(
-        not part["image_url"]["url"].startswith("data:") for part in image_parts
-    )
+    assert [part["image_url"]["url"] for part in image_parts] == [
+        "data:image/jpeg;base64,anBlZy0x",
+        "data:image/jpeg;base64,anBlZy0y",
+    ]
     assert captured["response_format"]["type"] == "json_schema"
     assert captured["response_format"]["json_schema"]["strict"] is True
     assert captured["reasoning_effort"] == "low"
     assert captured["max_tokens"] == 8192
-    assert result.raw_response["mode"] == "rustfs_frame_urls"
+    assert result.raw_response["mode"] == "rustfs_base64_frames"
+    assert len(result.raw_response["frame_asset_keys"]) == 2
+    assert all(
+        key.startswith("step5-frames/order-1/")
+        for key in result.raw_response["frame_asset_keys"]
+    )
+    assert "data:image" not in str(result.raw_response)

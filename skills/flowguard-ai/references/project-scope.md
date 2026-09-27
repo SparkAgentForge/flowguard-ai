@@ -20,14 +20,15 @@ not a product launch plan, event brief, or vendor entitlement statement.
 
 ## Deployment assumptions
 
-- PostgreSQL is the production database. Do not add a SQLite fallback.
+- PostgreSQL is the only supported database for the application and tests.
 - RustFS is the object store for manuals, pages, frames, videos, and report
   artifacts.
 - Docker Compose provides the API, Web, PostgreSQL, RustFS, and RustFS
   permissions services.
 - The official DeepStream SOP service is an independent deployment. It is not
   modified to contain FlowGuard business rules.
-- Step 5 requires a reachable object-storage URL for every image it receives.
+- Step 5 receives stored images as base64 data URLs; RustFS needs to be
+  reachable by the API, not by the model provider.
 
 ## Non-goals and safety boundaries
 

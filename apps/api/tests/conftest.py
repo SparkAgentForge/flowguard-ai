@@ -1,17 +1,45 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from flowguard_api.config import get_settings
 from flowguard_api.models import Base
 
 
+def _test_database_url() -> str:
+    database_url = os.environ.get("FLOWGUARD_TEST_DATABASE_URL", "").strip()
+    if not database_url:
+        raise pytest.UsageError(
+            "API tests require FLOWGUARD_TEST_DATABASE_URL pointing to a dedicated "
+            "PostgreSQL database."
+        )
+    url = make_url(database_url)
+    if url.get_backend_name() != "postgresql" or url.database != "flowguard_test":
+        raise pytest.UsageError(
+            "FLOWGUARD_TEST_DATABASE_URL must point to the dedicated PostgreSQL "
+            "database named flowguard_test."
+        )
+    return database_url
+
+
+def _reset_database(engine) -> None:
+    # The test database must be dedicated to the test run. Resetting its public
+    # schema keeps each test isolated without relying on an embedded database.
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+
+
 def pytest_configure(config: pytest.Config) -> None:
-    # Application imports during collection must not use a developer's database.
+    # Application imports during collection must use the explicitly isolated
+    # PostgreSQL test database rather than a developer's configured database.
+    database_url = _test_database_url()
     test_settings = pytest.MonkeyPatch()
-    test_settings.setenv("FLOWGUARD_DATABASE_URL", "sqlite://")
+    test_settings.setenv("FLOWGUARD_DATABASE_URL", database_url)
     get_settings.cache_clear()
     config.add_cleanup(test_settings.undo)
 
@@ -26,19 +54,25 @@ def isolate_test_settings(monkeypatch: pytest.MonkeyPatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def isolated_postgres_database():
+    engine = create_engine(_test_database_url(), pool_pre_ping=True)
+    _reset_database(engine)
+    yield
+    _reset_database(engine)
+    engine.dispose()
+
+
 @pytest.fixture
 def session() -> Session:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = create_engine(_test_database_url(), pool_pre_ping=True)
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
     try:
         yield testing_session
     finally:
         testing_session.close()
+        engine.dispose()
 
 
 @pytest.fixture

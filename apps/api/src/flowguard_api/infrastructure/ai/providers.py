@@ -1,4 +1,3 @@
-import ipaddress
 import json
 import math
 import mimetypes
@@ -7,7 +6,6 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from flowguard_api.config import get_settings
@@ -20,6 +18,7 @@ from flowguard_api.core.inference import (
 from flowguard_api.core.media import is_media_tool_runtime_error, resolve_media_tool
 from flowguard_api.core.storage import FileStorage
 from flowguard_api.infrastructure.ai.stepfun_client import Step5VisionClient
+from flowguard_api.infrastructure.storage.providers import LocalFileStorage
 
 
 class MockInferenceAdapter:
@@ -140,8 +139,13 @@ class FfmpegFrameExtractor:
             # and, with a dense budget, duplicated the final timestamp.  A
             # one-second Step 5 timeline now stays stable and every returned
             # timestamp corresponds to a real extracted frame.
-            frame_count = min(max_frames, max(2, math.ceil(duration / requested_interval) + 1))
-            interval = max(0.01, duration / max(1, frame_count - 1))
+            requested_count = max(2, math.ceil(duration / requested_interval) + 1)
+            frame_count = min(max_frames, requested_count)
+            interval = (
+                requested_interval
+                if requested_count <= max_frames
+                else max(0.01, duration / max(1, frame_count - 1))
+            )
             pattern = root / "frame-%03d.jpg"
             command = [
                 ffmpeg,
@@ -220,10 +224,13 @@ class FfmpegFrameExtractor:
 class Step5InferenceAdapter:
     STEPS_PER_REQUEST = 10
 
-    def __init__(self, storage: FileStorage | None = None) -> None:
+    def __init__(
+        self, storage: FileStorage | None = None, work_order_id: str | None = None
+    ) -> None:
         self.settings = get_settings()
         self.frame_extractor = FfmpegFrameExtractor()
         self.storage = storage
+        self.work_order_id = work_order_id
         self.client = Step5VisionClient(self.settings)
 
     def analyze(self, filename: str, video: bytes, steps: list[SopStepLike]) -> InferenceResult:
@@ -237,9 +244,13 @@ class Step5InferenceAdapter:
         if not steps:
             raise VideoInferenceError("SOP 没有可检查的步骤")
         frames = self.frame_extractor.extract(video, Path(filename).suffix.lower() or ".mp4")
-        if self.storage is None or not hasattr(self.storage, "get_url"):
-            raise VideoInferenceError("Step 5 帧分析需要配置 RustFS，以提供帧图片 URL")
-        frame_prefix = f"step5-frames/{uuid4().hex}"
+        if self.storage is None or isinstance(self.storage, LocalFileStorage):
+            raise VideoInferenceError("Step 5 帧分析需要配置 RustFS 存储")
+        frame_prefix = (
+            f"step5-frames/{self.work_order_id}/{uuid4().hex}"
+            if self.work_order_id
+            else f"step5-frames/{uuid4().hex}"
+        )
         frame_assets: list[str] = []
         for timestamp, frame in frames:
             frame_key = f"{frame_prefix}/frame-{timestamp:06d}.jpg"
@@ -248,16 +259,6 @@ class Step5InferenceAdapter:
             except Exception as error:
                 raise VideoInferenceError("视频帧写入 RustFS 失败") from error
             frame_assets.append(frame_key)
-        frame_urls: list[tuple[int, str]] = []
-        for (timestamp, _), frame_key in zip(frames, frame_assets, strict=True):
-            try:
-                frame_url = self.storage.get_url(
-                    frame_key, self.settings.stepfun_frame_url_expires_seconds
-                )
-            except Exception as error:
-                raise VideoInferenceError("视频帧 URL 生成失败") from error
-            self._validate_remote_frame_url(frame_url)
-            frame_urls.append((timestamp, frame_url))
         findings: list[InferenceFinding] = []
         model_responses: list[dict] = []
         steps_per_request = max(
@@ -267,50 +268,71 @@ class Step5InferenceAdapter:
                 getattr(self.settings, "stepfun_steps_per_request", self.STEPS_PER_REQUEST),
             ),
         )
-        for start in range(0, len(steps), steps_per_request):
-            group = steps[start : start + steps_per_request]
-            sampled_timestamps = [timestamp for timestamp, _ in frames]
-            content: list[dict] = [{"type": "text", "text": self._prompt(group, frames)}]
-            for timestamp, frame_url in frame_urls:
-                content.extend(
-                    [
-                        {"type": "text", "text": f"时间戳：{timestamp} 秒"},
-                        {"type": "image_url", "image_url": {"url": frame_url}},
-                    ]
-                )
-            raw_api_response = self._post_json(
-                f"{self.settings.stepfun_base_url.rstrip('/')}/chat/completions",
-                self._chat_payload(group, content, sampled_timestamps),
-            )
-            try:
-                parsed = self._response_payload(raw_api_response)
-            except VideoInferenceError:
-                parsed = {}
-            retried = False
-            if self._needs_retry(parsed, group):
-                retry_content = [
-                    {
-                        "type": "text",
-                        "text": self._compact_prompt(group, sampled_timestamps),
-                    },
-                    *content[1:],
+        # A long video is observed through overlapping windows. This keeps
+        # action boundaries visible to Step 5 while preventing the old global
+        # frame budget from turning a 133-second video into seven-second gaps.
+        windows = self._analysis_windows(frames)
+        for window_index, window in enumerate(windows):
+            for start in range(0, len(steps), steps_per_request):
+                group = steps[start : start + steps_per_request]
+                sampled_timestamps = [timestamp for timestamp, _ in window]
+                frame_parts = [
+                    (timestamp, self.client.image_part(frame, "image/jpeg"))
+                    for timestamp, frame in window
                 ]
+                content: list[dict] = [{"type": "text", "text": self._prompt(group, window)}]
+                for timestamp, frame_part in frame_parts:
+                    content.extend(
+                        [
+                            {"type": "text", "text": f"时间戳：{timestamp} 秒"},
+                            frame_part,
+                        ]
+                    )
                 raw_api_response = self._post_json(
                     f"{self.settings.stepfun_base_url.rstrip('/')}/chat/completions",
-                    self._chat_payload(group, retry_content, sampled_timestamps),
+                    self._chat_payload(group, content, sampled_timestamps),
                 )
-                parsed = self._response_payload(raw_api_response)
-                retried = True
-            findings.extend(self._parse(parsed, group, sampled_timestamps).findings)
-            model_responses.append(
-                {
-                    "step_codes": [step.code for step in group],
-                    "parsed": parsed,
-                    "usage": raw_api_response.get("usage"),
-                    "finish_reason": raw_api_response.get("choices", [{}])[0].get("finish_reason"),
-                    "retried_empty_findings": retried,
-                }
-            )
+                try:
+                    parsed = self._response_payload(raw_api_response)
+                except VideoInferenceError:
+                    parsed = {}
+                retried = False
+                if self._needs_retry(parsed, group):
+                    retry_content = [
+                        {
+                            "type": "text",
+                            "text": self._compact_prompt(group, sampled_timestamps),
+                        },
+                        *content[1:],
+                    ]
+                    raw_api_response = self._post_json(
+                        f"{self.settings.stepfun_base_url.rstrip('/')}/chat/completions",
+                        self._chat_payload(group, retry_content, sampled_timestamps),
+                    )
+                    parsed = self._response_payload(raw_api_response)
+                    retried = True
+                window_findings = self._parse(parsed, group, sampled_timestamps).findings
+                findings.extend(window_findings)
+                model_responses.append(
+                    {
+                        "window_index": window_index,
+                        "window_start_seconds": (
+                            sampled_timestamps[0] if sampled_timestamps else None
+                        ),
+                        "window_end_seconds": (
+                            sampled_timestamps[-1] if sampled_timestamps else None
+                        ),
+                        "step_codes": [step.code for step in group],
+                        "sampled_timestamps": sampled_timestamps,
+                        "parsed": parsed,
+                        "usage": raw_api_response.get("usage"),
+                        "finish_reason": raw_api_response.get("choices", [{}])[0].get(
+                            "finish_reason"
+                        ),
+                        "retried_empty_findings": retried,
+                    }
+                )
+        findings = self._merge_window_findings(findings, steps)
         findings = self._enforce_temporal_order(findings, steps)
         required_codes = {step.code for step in steps if step.required}
         detected_codes = {
@@ -325,34 +347,55 @@ class Step5InferenceAdapter:
             summary=f"Step 5 已完成 {len(model_responses)} 组视觉核对",
             findings=findings,
             raw_response={
-                "mode": "rustfs_frame_urls",
+                "mode": "rustfs_base64_frames",
                 "frame_asset_keys": frame_assets,
                 "sampled_timestamps": [timestamp for timestamp, _ in frames],
+                "analysis_windows": [
+                    {
+                        "start_seconds": window[0][0],
+                        "end_seconds": window[-1][0],
+                        "frame_timestamps": [timestamp for timestamp, _ in window],
+                    }
+                    for window in windows
+                ],
                 "model_responses": model_responses,
             },
         )
 
-    @staticmethod
-    def _validate_remote_frame_url(frame_url: str) -> None:
-        parsed = urlparse(frame_url)
-        host = parsed.hostname
-        if parsed.scheme not in {"http", "https"} or not host:
-            raise VideoInferenceError(
-                "Step 5 无法访问 RustFS 帧地址，请配置有效的 HTTP(S) URL"
-            )
-        normalized_host = host.lower()
-        try:
-            address = ipaddress.ip_address(normalized_host)
-        except ValueError:
-            address = None
-        if normalized_host in {"localhost", "localhost.localdomain"} or (
-            address is not None
-            and (address.is_loopback or address.is_private or address.is_link_local)
-        ):
-            raise VideoInferenceError(
-                "Step 5 无法访问本机 RustFS 帧地址，请将 FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT "
-                "配置为 Step 5 可访问的地址后重试"
-            )
+    def _analysis_windows(self, frames: list[tuple[int, bytes]]) -> list[list[tuple[int, bytes]]]:
+        if not frames:
+            return []
+        window_seconds = max(2, int(getattr(self.settings, "stepfun_analysis_window_seconds", 20)))
+        overlap_seconds = max(
+            0,
+            min(
+                window_seconds - 1,
+                int(getattr(self.settings, "stepfun_analysis_window_overlap_seconds", 4)),
+            ),
+        )
+        max_images = 50  # Keep a margin below Step 5's 60-image request limit.
+        timestamps = [timestamp for timestamp, _ in frames]
+        by_timestamp = dict(frames)
+        duration = timestamps[-1]
+        step = max(1, window_seconds - overlap_seconds)
+        starts = list(range(0, duration + 1, step)) or [0]
+        windows: list[list[tuple[int, bytes]]] = []
+        for start in starts:
+            end = min(duration, start + window_seconds)
+            selected = [
+                (timestamp, by_timestamp[timestamp])
+                for timestamp in timestamps
+                if start <= timestamp <= end
+            ]
+            if not selected:
+                continue
+            if len(selected) > max_images:
+                stride = (len(selected) - 1) / (max_images - 1)
+                selected = [selected[round(index * stride)] for index in range(max_images)]
+            windows.append(selected)
+            if end >= duration:
+                break
+        return windows
 
     def _chat_payload(
         self,
@@ -448,6 +491,11 @@ class Step5InferenceAdapter:
         return (
             "核对以下 SOP 步骤是否在按时间排序的画面中出现。缺少明确证据时 detected 必须为 false。"
             "每个步骤只能选择最直接支持该步骤的真实帧，不能因为后续成品状态而回填前置步骤；"
+            "只有正在执行该步骤的动作才算 detected=true，已经安装完成后的静态部件、手停留在部件旁、"
+            "或后续画面中看到的最终状态都不能反推前置步骤；"
+            "对于多个同类步骤（例如第一个至第六个风扇），优先依据动作首次发生的时间顺序判断；"
+            "若只看到同类装配动作但无法区分具体序号，detected 必须为 false，"
+            "但必须保留实际看到动作的帧；"
             "confidence 表示对 detected 判断的确信程度，不是动作出现概率；"
             "确认未出现且画面覆盖充分时也可高分，遮挡或抽帧证据不足时应低分。"
             "detected=false 不代表 confidence=0；仅完全无法判断时填 0。"
@@ -531,6 +579,7 @@ class Step5InferenceAdapter:
                         evidence="Step 5 未返回该步骤的视觉判断，需要人工复核",
                         frame_timestamps=[],
                         evidence_score=0,
+                        candidate_frame_timestamps=[],
                     )
                 )
                 continue
@@ -571,8 +620,7 @@ class Step5InferenceAdapter:
                         if value is not None
                     }
                 )
-            if not detected:
-                evidence_timestamps = []
+            candidate_timestamps = evidence_timestamps
             start_seconds = min(evidence_timestamps) if detected and evidence_timestamps else None
             end_seconds = max(evidence_timestamps) if detected and evidence_timestamps else None
             findings.append(
@@ -594,6 +642,13 @@ class Step5InferenceAdapter:
                     ),
                     chunk_idx=_as_int(item.get("chunk_idx")),
                     cv_boundary_score=_as_float(item.get("cv_boundary_score")),
+                    candidate_frame_timestamps=candidate_timestamps,
+                    candidate_start_seconds=(
+                        min(candidate_timestamps) if candidate_timestamps else None
+                    ),
+                    candidate_end_seconds=(
+                        max(candidate_timestamps) if candidate_timestamps else None
+                    ),
                 )
             )
         overall_pass = all(item.detected and item.start_seconds is not None for item in findings)
@@ -605,6 +660,204 @@ class Step5InferenceAdapter:
             findings=findings,
             raw_response=raw_response or payload,
         )
+
+    @staticmethod
+    def _finding_rank(finding: InferenceFinding) -> tuple[int, int, int, int]:
+        timestamps = finding.frame_timestamps or finding.candidate_frame_timestamps or []
+        first_timestamp = min(timestamps) if timestamps else 10**9
+        if finding.detected and finding.start_seconds is not None:
+            # Among confirmed observations, prefer the earliest real action;
+            # this prevents a later static-state match from winning on score.
+            return (
+                1,
+                10**9 - finding.start_seconds,
+                (
+                    finding.evidence_score
+                    if finding.evidence_score is not None
+                    else finding.confidence
+                ),
+                finding.confidence,
+            )
+        return (
+            0,
+            finding.evidence_score if finding.evidence_score is not None else finding.confidence,
+            finding.confidence,
+            -first_timestamp,
+        )
+
+    @staticmethod
+    def _candidate_time_range(finding: InferenceFinding) -> tuple[int, int] | None:
+        timestamps = finding.candidate_frame_timestamps or finding.frame_timestamps
+        if not timestamps:
+            return None
+        return min(timestamps), max(timestamps)
+
+    @staticmethod
+    def _has_direct_evidence(finding: InferenceFinding) -> bool:
+        return bool(
+            finding.detected
+            and finding.start_seconds is not None
+            and finding.end_seconds is not None
+            and finding.frame_timestamps
+        )
+
+    @staticmethod
+    def _is_action_candidate(finding: InferenceFinding) -> bool:
+        """Return true only for an uncertain finding that describes an action.
+
+        Step 5 often returns the sampled frames even when it cannot map a
+        generic action to a repeated SOP step. Those frames are valuable for
+        review, but negative observations such as "未见安装动作" must never
+        become a candidate just because the model supplied timestamps.
+        """
+        if finding.detected or Step5InferenceAdapter._candidate_time_range(finding) is None:
+            return False
+        evidence = finding.evidence.strip()
+        if not evidence:
+            return False
+        action_markers = (
+            "有装配动作",
+            "可见手部装配",
+            "装配操作",
+            "安装动作",
+            "风扇安装动作",
+            "电源安装动作",
+            "按压",
+            "推入",
+            "放入",
+            "连接",
+        )
+        negative_markers = (
+            "未观察到",
+            "未见",
+            "未显示",
+            "未出现",
+            "没有观察到",
+            "无安装",
+        )
+        return any(marker in evidence for marker in action_markers) and not any(
+            marker in evidence for marker in negative_markers
+        )
+
+    @staticmethod
+    def _downgrade_candidate(finding: InferenceFinding) -> InferenceFinding:
+        """Keep an early action location without presenting it as confirmed."""
+        score = min(finding.evidence_score or finding.confidence, 59)
+        confidence = min(finding.confidence, 59)
+        evidence = finding.evidence
+        if "待复核" not in evidence:
+            evidence = f"{evidence}；动作位置为候选证据，步骤序号待复核"
+        return InferenceFinding(
+            step_code=finding.step_code,
+            detected=False,
+            confidence=confidence,
+            start_seconds=None,
+            end_seconds=None,
+            evidence=evidence,
+            frame_timestamps=[],
+            occluded=finding.occluded,
+            evidence_score=score,
+            chunk_idx=finding.chunk_idx,
+            cv_boundary_score=finding.cv_boundary_score,
+            candidate_frame_timestamps=(
+                finding.candidate_frame_timestamps or finding.frame_timestamps
+            ),
+            candidate_start_seconds=finding.candidate_start_seconds
+            or (Step5InferenceAdapter._candidate_time_range(finding) or (None, None))[0],
+            candidate_end_seconds=finding.candidate_end_seconds
+            or (Step5InferenceAdapter._candidate_time_range(finding) or (None, None))[1],
+        )
+
+    @classmethod
+    def _merge_window_findings(
+        cls, findings: list[InferenceFinding], steps: list[SopStepLike]
+    ) -> list[InferenceFinding]:
+        """Select one observation per step while retaining uncertain candidates.
+
+        The provider is called on overlapping windows. A later window can
+        describe an already-installed component with high confidence and
+        incorrectly assign it to an earlier repeated step. For the first
+        required step, an earlier explicit action candidate is therefore more
+        useful than a later confirmation: it preserves the real location and
+        sends the ambiguity to human review instead of moving the step to a
+        false late timestamp. Other steps retain the existing conservative
+        confirmed-evidence ranking until an equivalent ordered candidate is
+        available.
+        """
+        grouped: dict[str, list[InferenceFinding]] = {}
+        for finding in findings:
+            grouped.setdefault(finding.step_code, []).append(finding)
+        selected_by_code: dict[str, InferenceFinding] = {}
+        required_steps = sorted(
+            (step for step in steps if getattr(step, "required", True)),
+            key=lambda item: item.sequence,
+        )
+        first_required_code = required_steps[0].code if required_steps else None
+        cursor: int | None = None
+        for step in sorted(steps, key=lambda item: item.sequence):
+            options = grouped.get(step.code, [])
+            if not options:
+                selected_by_code[step.code] = InferenceFinding(
+                    step_code=step.code,
+                    detected=False,
+                    confidence=0,
+                    start_seconds=None,
+                    end_seconds=None,
+                    evidence="Step 5 未返回该步骤的视觉判断，需要人工复核",
+                    frame_timestamps=[],
+                    evidence_score=0,
+                    candidate_frame_timestamps=[],
+                )
+                continue
+            selected: InferenceFinding | None = None
+            rank_options = options
+            if getattr(step, "required", True) and cursor is not None:
+                ordered_direct_options = [
+                    option
+                    for option in options
+                    if cls._has_direct_evidence(option)
+                    and option.start_seconds is not None
+                    and option.start_seconds >= cursor
+                ]
+                if ordered_direct_options:
+                    rank_options = ordered_direct_options
+            if step.code == first_required_code:
+                direct_options = [option for option in options if cls._has_direct_evidence(option)]
+                action_candidates = [
+                    option for option in options if cls._is_action_candidate(option)
+                ]
+                if direct_options and action_candidates:
+                    earliest_direct = min(
+                        direct_options,
+                        key=lambda option: option.start_seconds
+                        if option.start_seconds is not None
+                        else float("inf"),
+                    )
+                    earliest_candidate = min(
+                        action_candidates,
+                        key=lambda option: cls._candidate_time_range(option)[0]
+                        if cls._candidate_time_range(option) is not None
+                        else float("inf"),
+                    )
+                    candidate_range = cls._candidate_time_range(earliest_candidate)
+                    if (
+                        candidate_range is not None
+                        and earliest_direct.start_seconds is not None
+                        and candidate_range[0] < earliest_direct.start_seconds
+                    ):
+                        selected = cls._downgrade_candidate(earliest_candidate)
+            if selected is None:
+                selected = max(rank_options, key=cls._finding_rank)
+            selected_by_code[step.code] = selected
+            if getattr(step, "required", True):
+                selected_range = (
+                    (selected.start_seconds, selected.end_seconds)
+                    if cls._has_direct_evidence(selected)
+                    else cls._candidate_time_range(selected)
+                )
+                if selected_range is not None:
+                    cursor = selected_range[1] if cursor is None else max(cursor, selected_range[1])
+        return [selected_by_code[step.code] for step in steps]
 
     @staticmethod
     def _enforce_temporal_order(
@@ -634,6 +887,12 @@ class Step5InferenceAdapter:
                     evidence_score=min(finding.evidence_score or finding.confidence, 40),
                     chunk_idx=finding.chunk_idx,
                     cv_boundary_score=finding.cv_boundary_score,
+                    candidate_frame_timestamps=(
+                        finding.candidate_frame_timestamps or finding.frame_timestamps
+                    ),
+                    candidate_start_seconds=finding.candidate_start_seconds
+                    or finding.start_seconds,
+                    candidate_end_seconds=finding.candidate_end_seconds or finding.end_seconds,
                 )
                 continue
             current_end = finding.end_seconds or finding.start_seconds

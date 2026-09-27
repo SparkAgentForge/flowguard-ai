@@ -34,10 +34,9 @@ official `sop-inference-bp` implementation.
    - FlowGuard owns the reviewed SOP execution graph, evidence gates, sequence
      decisions, exception state, human review, rework, and immutable reports.
 3. For Step 5 PDF or video work, persist images to RustFS before sending a
-   request. Send only Step 5-reachable presigned URLs, retain object keys in
-   the audit record, and keep internal and public object-storage endpoints
-   separate. Never silently fall back to inline frame bytes or an inaccessible
-   localhost URL.
+   request. Send image bytes as base64 data URLs in the model request and
+   retain object keys in the audit record. The model must not need to fetch
+   RustFS objects; keep browser-preview URLs separate from the AI request.
 4. For DeepStream work, call the unchanged official service through
    `DeepStreamInferenceAdapter`. Use its `/v1/files` and
    `/v1/chat/completions` contract and map `chunk_metadata_list` to the

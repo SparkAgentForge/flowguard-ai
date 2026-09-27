@@ -206,8 +206,13 @@ class AuditFindingRead(ApiModel):
     cv_boundary_score: float | None = None
     start_seconds: int | None
     end_seconds: int | None
+    candidate_start_seconds: int | None = None
+    candidate_end_seconds: int | None = None
     evidence: str
     frame_timestamps: list[int]
+    candidate_frame_timestamps: list[int] = Field(default_factory=list)
+    has_confirmed_clip: bool = False
+    has_candidate_clip: bool = False
 
 
 class VideoAuditRead(ApiModel):

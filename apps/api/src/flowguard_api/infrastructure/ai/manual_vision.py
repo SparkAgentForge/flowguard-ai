@@ -9,6 +9,7 @@ from flowguard_api.config import get_settings
 from flowguard_api.core.storage import FileStorage
 from flowguard_api.infrastructure.ai.stepfun_client import Step5VisionClient
 from flowguard_api.infrastructure.documents.pdf_renderer import PdfPageRenderer
+from flowguard_api.infrastructure.storage.providers import LocalFileStorage
 from flowguard_api.services.sop_extractor import (
     DocumentExtractionError,
     ExtractedSop,
@@ -43,8 +44,8 @@ class Step5ManualVisionExtractor:
             return self.docx_fallback.extract(filename, content)
         if not content:
             raise DocumentExtractionError("文档内容为空")
-        if self.storage is None or not hasattr(self.storage, "get_url"):
-            raise DocumentExtractionError("Step 5 PDF 视觉解析需要配置 RustFS URL")
+        if self.storage is None or isinstance(self.storage, LocalFileStorage):
+            raise DocumentExtractionError("Step 5 PDF 视觉解析需要配置 RustFS 存储")
         if not self.client.settings.stepfun_api_key:
             raise DocumentExtractionError("未配置 FLOWGUARD_STEPFUN_API_KEY")
         try:
@@ -59,13 +60,10 @@ class Step5ManualVisionExtractor:
             for page in pages:
                 key = f"sop-manual-pages/{digest}/page-{page.page_number:04d}.png"
                 self.storage.put(key, page.content)
-                url = self.storage.get_url(
-                    key, get_settings().stepfun_frame_url_expires_seconds
-                )
                 page_parts.extend(
                     [
                         {"type": "text", "text": f"下面是操作手册第 {page.page_number} 页"},
-                        {"type": "image_url", "image_url": {"url": url}},
+                        self.client.image_part(page.content, "image/png"),
                     ]
                 )
             raw_response = self.client.chat(

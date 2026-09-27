@@ -1,5 +1,7 @@
+import base64
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -73,7 +75,7 @@ class PageStorage:
         return self.assets[key]
 
     def get_url(self, key: str, expires_seconds: int = 900) -> str:
-        return f"https://rustfs.example/{key}?expires={expires_seconds}"
+        raise AssertionError("Step 5 must not fetch RustFS URLs")
 
 
 def upload_and_extract(client: TestClient) -> dict:
@@ -226,7 +228,69 @@ def test_step5_rejects_out_of_range_pdf_page_reference() -> None:
         )
 
 
-def test_pdf_visual_extraction_uploads_pages_and_sends_image_urls(client: TestClient) -> None:
+def test_pdf_visual_extractor_stores_page_before_sending_base64() -> None:
+    storage = PageStorage()
+    step5 = Step5VisionClient(
+        Settings(
+            database_url="postgresql+pg8000://test:test@localhost:5432/flowguard_test",
+            stepfun_api_key="test-key",
+            _env_file=None,
+        )
+    )
+    image = b"\x89PNG\r\n\x1a\npage"
+
+    def post_json(url: str, payload: dict) -> dict:
+        assert list(storage.assets.values()) == [image]
+        image_parts = [
+            part for part in payload["messages"][1]["content"] if part["type"] == "image_url"
+        ]
+        assert image_parts == [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64," + base64.b64encode(image).decode("ascii")
+                },
+            }
+        ]
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"steps":[{"sequence":1,"name":"安装风扇",'
+                            '"source_refs":[{"page":1,"quote":"Install fan"}]}]}'
+                        )
+                    }
+                }
+            ]
+        }
+
+    step5.post_json = post_json
+    renderer = SimpleNamespace(
+        render=lambda content: [SimpleNamespace(page_number=1, content=image)]
+    )
+    result = Step5ManualVisionExtractor(storage, renderer=renderer, client=step5).extract(
+        "manual.pdf", b"%PDF-example"
+    )
+
+    assert result.steps[0].source_refs[0].page == 1
+
+
+def test_pdf_visual_extractor_rejects_local_file_storage(tmp_path: Path) -> None:
+    step5 = Step5VisionClient(
+        Settings(
+            database_url="postgresql+pg8000://test:test@localhost:5432/flowguard_test",
+            stepfun_api_key="test-key",
+            _env_file=None,
+        )
+    )
+    extractor = Step5ManualVisionExtractor(LocalFileStorage(str(tmp_path)), client=step5)
+
+    with pytest.raises(DocumentExtractionError, match="RustFS 存储"):
+        extractor.extract("manual.pdf", b"%PDF-example")
+
+
+def test_pdf_visual_extraction_uploads_pages_and_sends_base64_images(client: TestClient) -> None:
     storage = PageStorage()
     step5 = Step5VisionClient(Settings(stepfun_api_key="test-key"))
     captured: dict = {}
@@ -274,11 +338,10 @@ def test_pdf_visual_extraction_uploads_pages_and_sends_image_urls(client: TestCl
     parts = captured["payload"]["messages"][1]["content"]
     image_parts = [part for part in parts if part["type"] == "image_url"]
     assert len(image_parts) == 2
-    assert all(
-        part["image_url"]["url"].startswith("https://rustfs.example/")
-        for part in image_parts
-    )
-    assert all("data:" not in part["image_url"]["url"] for part in image_parts)
+    assert [part["image_url"]["url"] for part in image_parts] == [
+        "data:image/png;base64," + base64.b64encode(page).decode("ascii")
+        for page in png_assets
+    ]
 
 
 def test_pdf_visual_extraction_without_step5_key_returns_422(client: TestClient) -> None:

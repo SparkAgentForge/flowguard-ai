@@ -35,17 +35,51 @@ class WorkOrderDeletionBlocked(ValueError):
     pass
 
 
+class WorkOrderStorageDeletionError(RuntimeError):
+    pass
+
+
 PROTECTED_STATUSES = {WorkOrderStatus.RELEASED, WorkOrderStatus.ARCHIVED}
 
 
 def _frame_asset_keys(audits: Iterable[VideoAudit]) -> set[str]:
     keys: set[str] = set()
     for audit in audits:
+        if audit.provider != "stepfun":
+            continue
         raw_response = audit.raw_response or {}
         frame_keys = raw_response.get("frame_asset_keys", [])
         if isinstance(frame_keys, list):
-            keys.update(key for key in frame_keys if isinstance(key, str) and key)
+            keys.update(
+                key
+                for key in frame_keys
+                if isinstance(key, str) and key.startswith("step5-frames/")
+            )
     return keys
+
+
+def _owned_storage_keys(
+    videos: Iterable[VideoAsset], reports: Iterable[Report], audits: Iterable[VideoAudit]
+) -> set[str]:
+    videos = list(videos)
+    audits = list(audits)
+    clip_keys = {
+        key
+        for audit in audits
+        for key in (
+            (audit.raw_response or {}).get("evidence_clips", {}).values()
+            if isinstance((audit.raw_response or {}).get("evidence_clips", {}), dict)
+            else []
+        )
+        if isinstance(key, str) and key.startswith("evidence-clips/")
+    }
+    return {
+        *(video.storage_key for video in videos),
+        *(f"video-previews/{video.id}.mp4" for video in videos),
+        *(report.pdf_storage_key for report in reports),
+        *_frame_asset_keys(audits),
+        *clip_keys,
+    }
 
 
 def delete_work_order(
@@ -68,7 +102,7 @@ def delete_work_order(
     if confirmation != work_order.code:
         raise WorkOrderDeleteConfirmationError("请输入完全一致的工单编号进行确认")
     if work_order.status in PROTECTED_STATUSES:
-        raise WorkOrderDeletionBlocked("已发布或已归档的工单不能删除，请保留其生产追溯记录")
+        raise WorkOrderDeletionBlocked("已放行或已归档的工单不能删除，请保留其生产追溯记录")
 
     audits = session.scalars(
         select(VideoAudit).where(VideoAudit.work_order_id == work_order_id)
@@ -79,15 +113,30 @@ def delete_work_order(
     videos = session.scalars(
         select(VideoAsset).where(VideoAsset.work_order_id == work_order_id)
     ).all()
-    storage_keys = {
-        *(video.storage_key for video in videos),
-        *(report.pdf_storage_key for report in reports),
-        *_frame_asset_keys(audits),
+    rework_task_ids = session.scalars(
+        select(ReworkTask.id).where(ReworkTask.work_order_id == work_order_id)
+    ).all()
+    storage_keys = _owned_storage_keys(videos, reports, audits)
+    storage_prefixes = {
+        f"videos/{work_order_id}/",
+        f"reports/{work_order_id}/",
+        f"step5-frames/{work_order_id}/",
+        f"evidence-clips/{work_order_id}/",
+        *(f"rework/{task_id}/" for task_id in rework_task_ids),
     }
 
     try:
-        for key in storage_keys:
-            storage.delete(key)
+        try:
+            for prefix in sorted(storage_prefixes):
+                storage_keys.update(
+                    key for key in storage.list_prefix(prefix) if key.startswith(prefix)
+                )
+            for key in sorted(storage_keys):
+                storage.delete(key)
+        except Exception as error:
+            raise WorkOrderStorageDeletionError(
+                "工单文件清理失败，工单记录未删除；部分文件可能已清理，请重试"
+            ) from error
 
         audit_ids = [audit.id for audit in audits]
         exception_ids = session.scalars(

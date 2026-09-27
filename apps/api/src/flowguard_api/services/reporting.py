@@ -94,6 +94,7 @@ def build_report_content(session: Session, work_order: WorkOrder) -> dict:
                 "summary": audit.summary,
                 "executionTrace": audit.execution_trace,
                 "frameAssetKeys": audit.raw_response.get("frame_asset_keys", []),
+                "evidenceClips": audit.raw_response.get("evidence_clips", {}),
                 "findings": [
                     {
                         "sequence": finding.sequence,
@@ -107,8 +108,11 @@ def build_report_content(session: Session, work_order: WorkOrder) -> dict:
                         "cvBoundaryScore": finding.cv_boundary_score,
                         "startSeconds": finding.start_seconds,
                         "endSeconds": finding.end_seconds,
+                        "candidateStartSeconds": finding.candidate_start_seconds,
+                        "candidateEndSeconds": finding.candidate_end_seconds,
                         "evidence": finding.evidence,
                         "frameTimestamps": finding.frame_timestamps,
+                        "candidateFrameTimestamps": finding.candidate_frame_timestamps,
                     }
                     for finding in sorted(audit.findings, key=lambda item: item.sequence)
                 ],

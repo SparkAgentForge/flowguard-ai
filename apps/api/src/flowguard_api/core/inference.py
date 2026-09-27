@@ -33,6 +33,12 @@ class InferenceFinding:
     evidence_score: int | None = None
     chunk_idx: int | None = None
     cv_boundary_score: float | None = None
+    # A model may point at a plausible location without having enough
+    # confidence to confirm the SOP step. Keep that location for human review,
+    # but never use it as automatic execution evidence.
+    candidate_frame_timestamps: list[int] | None = None
+    candidate_start_seconds: int | None = None
+    candidate_end_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -52,4 +58,3 @@ class VideoInferenceAdapter(Protocol):
         video: bytes,
         steps: Sequence[SopStepLike],
     ) -> InferenceResult: ...
-

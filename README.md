@@ -67,6 +67,7 @@ npm run dev
 
 ```bash
 cd apps/api
+export FLOWGUARD_TEST_DATABASE_URL=postgresql+pg8000://flowguard:flowguard@localhost:5432/flowguard_test
 python -m pytest -q
 python -m ruff check src tests
 
@@ -80,11 +81,13 @@ python scripts/integration_smoke.py
 
 完整演示路径：上传并发布 SOP → 创建工作单 → 上传视频 → 开始视频审计 → 查看执行轨迹和复核请求 → 异常确认 → 派发返工 → 上传返工视频 → 复核放行 → 生成 PDF 报告。
 
+删除未放行工单时，`DELETE /api/v1/work-orders/{work_order_id}` 会同时清理其原始及返工视频、浏览器预览、Step 5 帧和 PDF 报告对象；未写入审计记录但位于工单专属前缀下的中间文件也会清理。可能由其他工单复用的 SOP 与来源手册保留。已放行或归档的工单不能删除。
+
 ## 配置重点
 
-`FLOWGUARD_DATABASE_URL` 为必填配置，缺失或为空时启动会报错，不会回退到 SQLite。实际运行使用 PostgreSQL，自动化测试显式使用 SQLite。
+`FLOWGUARD_DATABASE_URL` 为必填 PostgreSQL 配置，缺失或为空时启动会报错。自动化测试也使用独立的 PostgreSQL 测试库 `flowguard_test`，运行前创建该库并设置 `FLOWGUARD_TEST_DATABASE_URL`；测试会重置该库的 `public` schema，绝不能指向业务数据库。缺少测试库时 pytest 会直接拒绝运行。
 
-`.env.example` 包含数据库、RustFS、上传目录、视频大小、抽帧频率、人工复核阈值、API 监听地址、Step 5 和 DeepStream 配置。`FLOWGUARD_API_HOST` 与 `FLOWGUARD_API_PORT` 会同时作用于直接启动和 Docker Compose 启动；默认 API 地址仍为 `http://localhost:8000`。Step 5 视频默认使用独立的 `FLOWGUARD_STEPFUN_FRAME_INTERVAL_SECONDS=1` 与 `FLOWGUARD_STEPFUN_MAX_VIDEO_FRAMES=20`，避免长视频一次请求发送过多图片触发上游限制。默认 `FLOWGUARD_SOP_EXTRACTOR_PROVIDER=stepfun` 会把 PDF 手册逐页转 PNG、写入 RustFS，再以 presigned `image_url` 发给 Step 5 视觉解析；DOCX 仍由本地规则解析。`rule_based` 只支持 DOCX，不对 PDF 做文本层抽取。将 `FLOWGUARD_INFERENCE_PROVIDER` 改为 `stepfun` 并设置 `FLOWGUARD_STEPFUN_API_KEY` 后，视频适配器会把抽出的 JPEG 帧写入 RustFS，再把带时效的 presigned URL 作为 `image_url` 发送给 Step 5；改为 `deepstream` 时只调用官方 `sop-inference-bp` 的 `/v1/files` 和 `/v1/chat/completions`，执行图仍由 FlowGuard 判定。无 GPU、RustFS 或 API Key 的本地演示请保持视频推理的 `mock`。
+`.env.example` 包含数据库、RustFS、上传目录、视频大小、抽帧频率、人工复核阈值、API 监听地址、Step 5 和 DeepStream 配置。`FLOWGUARD_API_HOST` 与 `FLOWGUARD_API_PORT` 会同时作用于直接启动和 Docker Compose 启动；默认 API 地址仍为 `http://localhost:8000`。Step 5 视频默认使用独立的 `FLOWGUARD_STEPFUN_FRAME_INTERVAL_SECONDS=1` 与 `FLOWGUARD_STEPFUN_MAX_VIDEO_FRAMES=20`，避免长视频一次请求发送过多图片触发上游限制。默认 `FLOWGUARD_SOP_EXTRACTOR_PROVIDER=stepfun` 会把 PDF 手册逐页转 PNG、写入 RustFS，再以 Base64 data URL 发给 Step 5 视觉解析；DOCX 仍由本地规则解析。`rule_based` 只支持 DOCX，不对 PDF 做文本层抽取。将 `FLOWGUARD_INFERENCE_PROVIDER` 改为 `stepfun` 并设置 `FLOWGUARD_STEPFUN_API_KEY` 后，视频适配器会把抽出的 JPEG 帧写入 RustFS，再以 Base64 data URL 作为 `image_url` 发送给 Step 5；改为 `deepstream` 时只调用官方 `sop-inference-bp` 的 `/v1/files` 和 `/v1/chat/completions`，执行图仍由 FlowGuard 判定。无 GPU、RustFS 或 API Key 的本地演示请保持视频推理的 `mock`。
 
 ## 项目结构
 
@@ -120,4 +123,4 @@ ssh -p <SSH端口> -L 9001:localhost:9001 Developer@<公网 IP>
 
 公网 S3 API 必须使用非默认的 `RUSTFS_ACCESS_KEY` 和 `RUSTFS_SECRET_KEY`，不要把控制台或无鉴权的文件管理器直接暴露到公网。
 
-Step 5 若运行在容器或远程节点，`FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` 必须填写 Step 5 实际能访问的 RustFS 地址；它与 API 容器内部使用的 `FLOWGUARD_OBJECT_STORAGE_ENDPOINT` 可以不同。
+Step 5 图片通过请求体内的 Base64 data URL 传输，不需要访问 RustFS 的公网地址。`FLOWGUARD_OBJECT_STORAGE_ENDPOINT` 供 API 写入证据；`FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` 只在浏览器通过签名 URL 预览文件时使用，应填写浏览器可访问的地址。
