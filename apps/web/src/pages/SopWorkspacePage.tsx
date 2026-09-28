@@ -125,18 +125,18 @@ export function SopWorkspacePage() {
   return (
     <div className="sop-workspace">
       <header className="page-heading sop-heading">
-        <div><p className="eyebrow">标准作业程序</p><h1>SOP 审核台</h1></div>
+        <div><h1>SOP 审核台</h1></div>
         {version && <StatusBadge tone={version.status === 'PUBLISHED' ? 'success' : 'warning'}>{statusLabels[version.status]}</StatusBadge>}
       </header>
       <section className="sop-version-section">
-        <div className="section-heading"><div><span className="section-kicker">版本记录</span><h2>操作标准</h2></div><button className="secondary-action" onClick={() => { if (dirty && !window.confirm('当前修改尚未保存，确定导入新手册吗？')) return; setVersion(null); setFile(null); setDirty(false); setError(''); setSearchParams({}) }} type="button">导入新手册</button></div>
+        <div className="section-heading"><div><h2>操作标准</h2></div><button className="secondary-action" onClick={() => { if (dirty && !window.confirm('当前修改尚未保存，确定导入新手册吗？')) return; setVersion(null); setFile(null); setDirty(false); setError(''); setSearchParams({}) }} type="button">导入新手册</button></div>
         {versions.length ? <div className="sop-version-list">{versions.map((item) => <button aria-pressed={version?.id === item.id} className={version?.id === item.id ? 'is-active' : ''} key={item.id} onClick={() => selectVersion(item.id)} type="button"><strong>{item.name}</strong><small>{item.code} / {item.version} · {item.productCode}</small><StatusBadge tone={item.status === 'PUBLISHED' ? 'success' : 'warning'}>{statusLabels[item.status]}</StatusBadge></button>)}</div> : <p className="section-empty">还没有 SOP 版本。</p>}
       </section>
 
       {!version ? (
         <div className="sop-intake-grid">
           <form className="upload-panel" onSubmit={extract}>
-            <span className="section-kicker">导入手册</span>
+
             <h2>上传操作手册</h2>
             <p>PDF 或 DOCX · 最大 20 MiB</p>
             <input ref={inputRef} accept=".pdf,.docx" className="visually-hidden" id="sop-file" onChange={selectFile} type="file" />

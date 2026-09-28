@@ -1,23 +1,17 @@
 import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowRight, ExternalLink, Play } from 'lucide-react'
+import { ArrowRight, Play } from 'lucide-react'
 
 import { StatusBadge } from '../components/StatusBadge'
 import {
   createWorkOrder, deleteWorkOrder, inspectVideo, listAudits, listSops, listWorkOrders,
   resolveReviewRequest, type SopVersionSummary, type VideoAudit, type WorkOrder,
-  listVideos, type VideoAsset, uploadVideo, videoContentUrl, evidenceClipUrl,
+  uploadVideo, videoContentUrl,
 } from '../lib/api'
-import { auditDecisionLabels, auditStatusLabels, evidenceStatusLabels, workOrderStatusLabels } from '../lib/presentation'
+import { auditDecisionLabels, auditStatusLabels, evidenceStatusLabels, workOrderStatusLabels, workOrderStatusTone } from '../lib/presentation'
 
 const ACTOR_ID = 'quality-demo'
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024
-
-function statusTone(status: string) {
-  if (status === 'VERIFIED' || status === 'RELEASED' || status === 'ARCHIVED') return 'success' as const
-  if (status === 'EXCEPTION_PENDING' || status === 'MANUAL_REVIEW') return 'danger' as const
-  return 'warning' as const
-}
 
 function formatSeconds(value: number | null) {
   if (value === null) return '--:--'
@@ -32,7 +26,6 @@ export function WorkOrdersPage() {
   const [sops, setSops] = useState<SopVersionSummary[]>([])
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [history, setHistory] = useState<{ orderId: string; audits: VideoAudit[] } | null>(null)
-  const [videos, setVideos] = useState<VideoAsset[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [sopId, setSopId] = useState('')
   const [code, setCode] = useState('')
@@ -63,32 +56,15 @@ export function WorkOrdersPage() {
   useEffect(() => {
     if (!selectedOrderId) return
     let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const loadAudits = () => {
-      listAudits(selectedOrderId)
-        .then(async (audits) => {
-          if (!active) return
-          setHistory({ orderId: selectedOrderId, audits })
-          const uploadedVideos = await listVideos(selectedOrderId)
-          if (!active) return
-          setVideos(uploadedVideos)
-          if (audits.some((audit) => audit.status === 'PROCESSING')) {
-            timer = setTimeout(loadAudits, 3000)
-          }
-        })
-        .catch((cause) => {
-          if (active) setError(cause instanceof Error ? cause.message : '无法加载审计历史')
-        })
-    }
-    loadAudits()
-    return () => { active = false; if (timer) clearTimeout(timer) }
+    listAudits(selectedOrderId)
+      .then((audits) => { if (active) setHistory({ orderId: selectedOrderId, audits }) })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '无法加载审计历史') })
+    return () => { active = false }
   }, [selectedOrderId])
 
   function chooseOrder(id: string) {
     setSearchParams({ id })
     setFile(null)
-    setVideos([])
-    setHistory(null)
     setError('')
     setDeleteConfirmation('')
   }
@@ -136,49 +112,21 @@ export function WorkOrdersPage() {
     setFile(next); setError('')
   }
 
-  async function runInspectionForVideo(videoId: string) {
-    if (!selectedOrder) return setError('请先选择工单。')
-    setBusy(true); setError('')
-    try {
-      const result = await inspectVideo(selectedOrder.id, videoId, ACTOR_ID)
-      const nextStatus = result.status === 'PROCESSING'
-        ? 'INSPECTING'
-        : result.decision === 'PASS' ? 'VERIFIED' : result.decision === 'INSUFFICIENT_EVIDENCE' ? 'MANUAL_REVIEW' : 'EXCEPTION_PENDING'
-      setOrders((current) => current.map((item) => item.id === selectedOrder.id ? { ...item, status: nextStatus } : item))
-      setHistory((current) => ({ orderId: selectedOrder.id, audits: [result, ...(current?.orderId === selectedOrder.id ? current.audits.filter((item) => item.id !== result.id) : [])] }))
-      setSearchParams({ id: selectedOrder.id, audit: result.id })
-      if (result.status !== 'PROCESSING') setFile(null)
-    } catch (cause) {
-      // The request can time out while the server continues the audit. Reload
-      // the durable video/audit state instead of assuming it was lost.
-      const recovered = await Promise.all([
-        listAudits(selectedOrder.id),
-        listVideos(selectedOrder.id),
-        listWorkOrders(),
-      ]).then(([audits, uploadedVideos, ordersFromServer]) => ({ audits, uploadedVideos, ordersFromServer }))
-        .catch(() => ({
-          audits: [] as VideoAudit[],
-          uploadedVideos: [] as VideoAsset[],
-          ordersFromServer: [] as WorkOrder[],
-        }))
-      const { audits, uploadedVideos, ordersFromServer } = recovered
-      setHistory({ orderId: selectedOrder.id, audits })
-      setVideos(uploadedVideos)
-      if (ordersFromServer.length > 0) setOrders(ordersFromServer)
-      setError(cause instanceof Error ? cause.message : '视频检测请求中断，可刷新页面查看持久化进度。')
-    } finally { setBusy(false) }
-  }
-
   async function runInspection() {
     if (!selectedOrder || !file) return setError('请先选择工单和视频文件。')
     setBusy(true); setError('')
     try {
       const video = await uploadVideo(selectedOrder.id, file)
-      setVideos((current) => [video, ...current.filter((item) => item.id !== video.id)])
+      const result = await inspectVideo(selectedOrder.id, video.id, ACTOR_ID)
+      const nextStatus = result.decision === 'PASS' ? 'VERIFIED' : result.decision === 'INSUFFICIENT_EVIDENCE' ? 'MANUAL_REVIEW' : 'EXCEPTION_PENDING'
+      setOrders((current) => current.map((item) => item.id === selectedOrder.id ? { ...item, status: nextStatus } : item))
+      setHistory((current) => ({ orderId: selectedOrder.id, audits: [result, ...(current?.orderId === selectedOrder.id ? current.audits.filter((item) => item.id !== result.id) : [])] }))
+      setSearchParams({ id: selectedOrder.id, audit: result.id })
       setFile(null)
-      await runInspectionForVideo(video.id)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '视频上传失败。')
+      setOrders((current) => current.map((item) => item.id === selectedOrder.id ? { ...item, status: 'CREATED' } : item))
+      void listAudits(selectedOrder.id).then((audits) => setHistory({ orderId: selectedOrder.id, audits })).catch(() => undefined)
+      setError(cause instanceof Error ? cause.message : '视频检测失败。上传成功的视频可在当前工单中重新检测。')
     } finally { setBusy(false) }
   }
 
@@ -212,12 +160,14 @@ export function WorkOrdersPage() {
   return (
     <div className="work-orders-page">
       <header className="page-heading">
-        <div><p className="eyebrow">视频证据 / 执行图</p><h1>工单中心</h1></div>
-        {selectedOrder && <StatusBadge tone={statusTone(selectedOrder.status)}>{workOrderStatusLabels[selectedOrder.status] ?? selectedOrder.status}</StatusBadge>}
+        <div><h1>工单中心</h1></div>
+        {selectedOrder && <StatusBadge tone={workOrderStatusTone(selectedOrder.status)}>{workOrderStatusLabels[selectedOrder.status] ?? selectedOrder.status}</StatusBadge>}
       </header>
+      <details className="work-order-controls" open={!selectedAudit}>
+        <summary><span>工单与视频</span><span>{selectedOrder?.code ?? '选择或新建工单'}</span></summary>
       <div className="work-orders-layout">
         <section className="work-order-setup">
-          <div className="section-heading"><div><span className="section-kicker">工作单</span><h2>选择或新建</h2></div><span>{orders.length} 条</span></div>
+          <div className="section-heading"><div><h2>选择或新建</h2></div><span>{orders.length} 条</span></div>
           <div className="create-order-form">
             <label>已发布 SOP<select value={sopId} onChange={(event) => setSopId(event.target.value)}><option value="">选择 SOP 版本</option>{sops.map((sop) => <option key={sop.id} value={sop.id}>{sop.code} / {sop.version} · {sop.name}</option>)}</select></label>
             <label>工作单编号<input value={code} onChange={(event) => setCode(event.target.value)} placeholder="例如 WO-2026-001" /></label>
@@ -225,15 +175,15 @@ export function WorkOrdersPage() {
           </div>
           <label>查找工单<input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="编号或产品" /></label>
           <div className="order-list" aria-label="工单列表">
-            {visibleOrders.map((order) => <button className={`order-list__item${selectedOrder?.id === order.id ? ' is-selected' : ''}`} key={order.id} onClick={() => chooseOrder(order.id)} type="button"><strong>{order.code}</strong><StatusBadge tone={statusTone(order.status)}>{workOrderStatusLabels[order.status] ?? order.status}</StatusBadge></button>)}
+            {visibleOrders.map((order) => <button className={`order-list__item${selectedOrder?.id === order.id ? ' is-selected' : ''}`} key={order.id} onClick={() => chooseOrder(order.id)} type="button"><strong>{order.code}</strong><StatusBadge tone={workOrderStatusTone(order.status)}>{workOrderStatusLabels[order.status] ?? order.status}</StatusBadge></button>)}
             {!loading && visibleOrders.length === 0 && <p className="section-empty">没有匹配的工单。</p>}
           </div>
-          {selectedOrder && <div className="delete-order-panel">
-            <span className="section-kicker">清理测试数据</span>
-            <p>删除将同时清理该工单的视频、预览、审计、证据片段、异常、返工、通知、报告及 Step 5 帧对象。已放行或已归档工单不能删除。</p>
+          {selectedOrder && <details className="delete-order-panel">
+            <summary>删除当前工单</summary>
+            <p>删除将同时清理该工单的视频、审计、异常、返工、通知、报告及 Step 5 帧对象。已发布或已归档工单不能删除。</p>
             <label>输入工单编号确认<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder={selectedOrder.code} /></label>
             <button className="danger-action" disabled={busy || deleteConfirmation.trim() !== selectedOrder.code} onClick={() => { if (window.confirm(`确定永久删除工单 ${selectedOrder.code} 及其全部关联数据吗？`)) void removeSelectedOrder() }} type="button">删除当前工单</button>
-          </div>}
+          </details>}
         </section>
         <section className="inspection-panel">
           <div className="section-heading"><div><span className="section-kicker">视频审计</span><h2>{selectedOrder ? selectedOrder.code : '选择工作单'}</h2></div>{selectedSop && <span>{selectedSop.code} / {selectedSop.version}</span>}</div>
@@ -242,30 +192,25 @@ export function WorkOrdersPage() {
             <button className="primary-action" disabled={busy || !selectedOrder || !file} onClick={runInspection} type="button">{busy ? '正在上传并审计…' : '开始视频审计'} <ArrowRight size={17} /></button>
           </>}
           {error && <p className="form-error" role="alert">{error}</p>}
-          {selectedOrder && videos.length > 0 && <div className="uploaded-video-list"><div className="section-heading"><div><span className="section-kicker">已上传视频</span><h3>可继续审计</h3></div><span>{videos.length} 个</span></div>{videos.map((video) => { const audit = currentAudits.find((item) => item.videoId === video.id); const retryable = !audit || audit.status === 'FAILED'; return <div className="uploaded-video-row" key={video.id}><span>{video.filename}</span>{audit && !retryable ? <StatusBadge tone={audit.status === 'PROCESSING' ? 'warning' : 'success'}>{auditStatusLabels[audit.status]}</StatusBadge> : <button className="secondary-action" disabled={busy || !canInspect} onClick={() => void runInspectionForVideo(video.id)} type="button">{audit ? '重新审计' : '继续审计'}</button>}</div>})}</div>}
         </section>
       </div>
+      </details>
       <section className="audit-result" aria-live="polite">
-        <div className="section-heading"><div><span className="section-kicker">审计记录</span><h2>{selectedAudit ? (selectedAudit.status === 'PROCESSING' ? '正在检测' : selectedAudit.status === 'FAILED' ? '检测失败' : '步骤证据') : '等待检测结果'}</h2></div>{selectedAudit && <StatusBadge tone={selectedAudit.status === 'FAILED' ? 'danger' : selectedAudit.status === 'PROCESSING' ? 'warning' : selectedAudit.decision === 'PASS' ? 'success' : selectedAudit.decision === 'VIOLATION' ? 'danger' : 'warning'}>{auditStatusLabels[selectedAudit.status] ?? auditDecisionLabels[selectedAudit.decision]}</StatusBadge>}</div>
+        <div className="section-heading"><div><h2>{selectedAudit ? (selectedAudit.status === 'FAILED' ? '检测失败' : '步骤证据') : '等待检测结果'}</h2></div>{selectedAudit && <StatusBadge tone={selectedAudit.status === 'FAILED' ? 'danger' : selectedAudit.decision === 'PASS' ? 'success' : selectedAudit.decision === 'VIOLATION' ? 'danger' : 'warning'}>{selectedAudit.status === 'FAILED' ? auditStatusLabels.FAILED : auditDecisionLabels[selectedAudit.decision]}</StatusBadge>}</div>
         {currentAudits.length > 1 && <div className="audit-tabs" role="group" aria-label="选择审计记录">{currentAudits.map((item, index) => <button aria-pressed={selectedAudit?.id === item.id} className={selectedAudit?.id === item.id ? 'is-active' : ''} key={item.id} onClick={() => setSearchParams({ id: selectedOrderId, audit: item.id })} type="button">审计 {currentAudits.length - index} · {new Date(item.createdAt).toLocaleDateString('zh-CN')}</button>)}</div>}
-        {selectedAudit?.status === 'PROCESSING' ? <div className="audit-empty"><span>…</span><p>{selectedAudit.summary} 刷新页面不会丢失这条记录，分析完成后会自动更新。</p></div> : selectedAudit?.status === 'FAILED' ? <div className="audit-empty"><span>!</span><p>{selectedAudit.summary}。请检查 Step 5 与 RustFS 的网络配置后重试。</p></div> : selectedAudit && selectedOrder ? <>
+        {selectedAudit?.status === 'FAILED' ? <div className="audit-empty"><span>!</span><p>{selectedAudit.summary}。请检查 Step 5 与 RustFS 的网络配置后重试。</p></div> : selectedAudit && selectedOrder ? <>
           <p className="audit-summary">{selectedAudit.summary}</p>
           <div className="evidence-workspace">
             <div className="video-player"><video controls key={selectedAudit.videoId} onLoadedMetadata={(event) => { if (pendingSeek.current !== null) { event.currentTarget.currentTime = pendingSeek.current; pendingSeek.current = null } }} playsInline preload="metadata" ref={playerRef} src={videoContentUrl(selectedOrder.id, selectedAudit.videoId)} /><div className="video-player__footer"><span>审计视频</span><span>{selectedAudit.provider} / {selectedAudit.modelName}</span></div></div>
             <div className="evidence-timeline">{selectedAudit.findings.map((finding) => {
               const uncertain = finding.evidenceStatus === 'UNCERTAIN'
               const missing = finding.evidenceStatus === 'MISSING' || finding.evidenceStatus === 'MISORDERED'
-              const candidate = finding.candidateStartSeconds !== null && finding.candidateEndSeconds !== null
-              const clipKind = uncertain || missing ? 'candidate' as const : 'confirmed' as const
-              const hasClip = clipKind === 'candidate' ? finding.hasCandidateClip : finding.hasConfirmedClip
-              const displayStart = clipKind === 'candidate' ? finding.candidateStartSeconds : finding.startSeconds
-              const displayEnd = clipKind === 'candidate' ? finding.candidateEndSeconds : finding.endSeconds
-              return <article className={`timeline-item${uncertain ? ' is-uncertain' : missing ? ' is-missing' : ''}`} key={finding.id}><div className="timeline-item__rail"><span>{String(finding.sequence).padStart(2, '0')}</span><i /></div><div className="timeline-item__body"><div className="timeline-item__heading"><h3>{finding.stepName}</h3><strong>{evidenceStatusLabels[finding.evidenceStatus]}</strong></div><p>{finding.evidence}</p><div className="timeline-item__meta"><button className="time-link" disabled={displayStart === null} onClick={() => seekTo(displayStart)} type="button" title="跳转到视频时间点"><Play size={13} />{formatSeconds(displayStart)} – {formatSeconds(displayEnd)}</button>{hasClip && <a className="time-link" href={evidenceClipUrl(selectedOrder.id, selectedAudit.id, finding.sopStepId, clipKind)} rel="noreferrer" target="_blank" title={clipKind === 'candidate' ? '打开待复核候选片段' : '打开确认片段'}><ExternalLink size={13} />{clipKind === 'candidate' ? '待复核片段' : '确认片段'}</a>}{candidate && clipKind === 'candidate' && <span>候选证据，需人工确认</span>}<span>模型证据评分 {finding.evidenceScore}%</span><span>关键帧 {finding.frameTimestamps.length || finding.candidateFrameTimestamps.length} 张</span>{finding.occluded && <span>画面遮挡</span>}</div></div></article>
+              return <article className={`timeline-item${uncertain ? ' is-uncertain' : missing ? ' is-missing' : ''}`} key={finding.id}><div className="timeline-item__rail"><span>{String(finding.sequence).padStart(2, '0')}</span><i /></div><div className="timeline-item__body"><div className="timeline-item__heading"><h3>{finding.stepName}</h3><StatusBadge tone={uncertain ? 'warning' : missing ? 'danger' : finding.evidenceStatus === 'SKIPPED' ? 'neutral' : 'success'}>{evidenceStatusLabels[finding.evidenceStatus]}</StatusBadge></div><p>{finding.evidence}</p><div className="timeline-item__meta"><button className="time-link" disabled={finding.startSeconds === null} onClick={() => seekTo(finding.startSeconds)} type="button" title="跳转到视频时间点"><Play size={13} />{formatSeconds(finding.startSeconds)} – {formatSeconds(finding.endSeconds)}</button><span>模型证据评分 {finding.evidenceScore}%</span><span>关键帧 {finding.frameTimestamps.length} 张</span>{finding.occluded && <span>画面遮挡</span>}</div></div></article>
             })}</div>
           </div>
-          {selectedAudit.reviewRequests.length > 0 && <div className="review-request-list"><div className="section-heading"><div><span className="section-kicker">人工复核</span><h2>待核对的步骤</h2></div><span>{selectedAudit.reviewRequests.filter((item) => item.status === 'PENDING').length} 待处理</span></div>{selectedAudit.reviewRequests.map((item) => <article className="review-request" key={item.id}><div><strong>{item.stepName}</strong><p>{item.question}</p><button className="time-link" onClick={() => seekTo(item.startSeconds)} type="button" title="跳转到待复核片段"><Play size={13} />{formatSeconds(item.startSeconds)} – {formatSeconds(item.endSeconds)}</button><small>{item.reason}</small></div>{item.status === 'PENDING' ? <div className="review-request__actions"><label>判断依据<textarea onChange={(event) => setReviewNotes((current) => ({ ...current, [item.id]: event.target.value }))} rows={2} value={reviewNotes[item.id] ?? ''} /></label><div><button className="secondary-action" disabled={busy || !reviewNotes[item.id]?.trim()} onClick={() => resolveReview(item.id, 'REJECTED')} type="button">证据不足</button><button className="primary-action" disabled={busy || !reviewNotes[item.id]?.trim()} onClick={() => resolveReview(item.id, 'CONFIRMED')} type="button">确认完成</button></div></div> : <StatusBadge tone={item.status === 'CONFIRMED' ? 'success' : 'danger'}>{item.status === 'CONFIRMED' ? '已确认' : '已驳回'}</StatusBadge>}</article>)}</div>}
+          {selectedAudit.reviewRequests.length > 0 && <div className="review-request-list"><div className="section-heading"><div><h2>待核对的步骤</h2></div><span>{selectedAudit.reviewRequests.filter((item) => item.status === 'PENDING').length} 待处理</span></div>{selectedAudit.reviewRequests.map((item) => <article className="review-request" key={item.id}><div><strong>{item.stepName}</strong><p>{item.question}</p><button className="time-link" onClick={() => seekTo(item.startSeconds)} type="button" title="跳转到待复核片段"><Play size={13} />{formatSeconds(item.startSeconds)} – {formatSeconds(item.endSeconds)}</button><small>{item.reason}</small></div>{item.status === 'PENDING' ? <div className="review-request__actions"><label>判断依据<textarea onChange={(event) => setReviewNotes((current) => ({ ...current, [item.id]: event.target.value }))} rows={2} value={reviewNotes[item.id] ?? ''} /></label><div><button className="secondary-action" disabled={busy || !reviewNotes[item.id]?.trim()} onClick={() => resolveReview(item.id, 'REJECTED')} type="button">证据不足</button><button className="primary-action" disabled={busy || !reviewNotes[item.id]?.trim()} onClick={() => resolveReview(item.id, 'CONFIRMED')} type="button">确认完成</button></div></div> : <StatusBadge tone={item.status === 'CONFIRMED' ? 'success' : 'danger'}>{item.status === 'CONFIRMED' ? '已确认' : '已驳回'}</StatusBadge>}</article>)}</div>}
           {selectedAudit.decision !== 'PASS' && <p className="status-note">人工复核记录不会自动改变原始模型结论；异常确认与返工决策请在 <Link to="/exceptions">异常处置</Link> 完成。</p>}
-        </> : <div className="audit-empty"><span>03</span><p>{loading ? '正在加载…' : '选择工单并上传视频后，可在这里查看审计与视频证据。'}</p></div>}
+        </> : <div className="audit-empty"><p>{loading ? '正在加载…' : '请选择工单并上传视频。'}</p></div>}
       </section>
     </div>
   )

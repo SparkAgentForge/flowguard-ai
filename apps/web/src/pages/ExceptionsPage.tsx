@@ -136,12 +136,12 @@ export function ExceptionsPage() {
 
   return (
     <div className="exceptions-page">
-      <header className="page-heading"><div><p className="eyebrow">人工复核 / 返工</p><h1>异常处置</h1></div>{selected && <StatusBadge tone={badgeTone(selected.status)}>{statusLabel[selected.status]}</StatusBadge>}</header>
+      <header className="page-heading"><div><h1>异常处置</h1></div>{selected && <StatusBadge tone={badgeTone(selected.status)}>{statusLabel[selected.status]}</StatusBadge>}</header>
       {error && <p className="form-error" role="alert">{error}</p>}
       {!selected ? <section className="queue-empty"><strong>{loading ? '正在加载…' : '当前没有异常记录'}</strong></section> : <div className="exception-layout">
         <aside className="exception-queue"><span className="section-kicker">异常队列 · {items.length}</span>{items.map((item) => <button className={`exception-queue__item${selected.id === item.id ? ' is-selected' : ''}`} key={item.id} onClick={() => selectItem(item)} type="button"><strong>{item.workOrderCode}</strong><span>{exceptionRuleLabels[item.ruleCode] ?? item.ruleCode}</span><StatusBadge tone={badgeTone(item.status)}>{statusLabel[item.status]}</StatusBadge></button>)}</aside>
-        <main className="exception-detail">
-          <section className="exception-facts"><div className="section-heading"><div><span className="section-kicker">初始审计</span><h2>{selected.decision === 'INSUFFICIENT_EVIDENCE' ? '关键画面不足' : '流程偏差'}</h2></div><span>{selected.audit.modelName}</span></div><p className="audit-summary">{selected.audit.summary}</p>{selected.facts.map((fact, index) => <blockquote key={`${index}-${fact}`}>{fact}</blockquote>)}<div className="compact-findings">{selected.audit.findings.map((finding) => <div key={finding.id}><span>{String(finding.sequence).padStart(2, '0')}</span><strong>{finding.stepName}</strong><small>{evidenceStatusLabels[finding.evidenceStatus]} · {finding.confidence}%</small></div>)}</div><Link className="text-action" to={`/work-orders?id=${selected.workOrderId}&audit=${selected.audit.id}`}>查看视频与逐步证据 <ArrowRight size={17} /></Link>
+        <div className="exception-detail">
+          <section className={`exception-facts${selected.decision === 'INSUFFICIENT_EVIDENCE' ? ' is-uncertain' : ''}`}><div className="section-heading"><div><span className="section-kicker">初始审计</span><h2>{selected.decision === 'INSUFFICIENT_EVIDENCE' ? '关键画面不足' : '流程偏差'}</h2></div><span>{selected.audit.modelName}</span></div><p className="audit-summary">{selected.audit.summary}</p>{selected.facts.map((fact, index) => <blockquote key={`${index}-${fact}`}>{fact}</blockquote>)}<div className="compact-findings">{selected.audit.findings.map((finding) => <div key={finding.id}><span>{String(finding.sequence).padStart(2, '0')}</span><strong>{finding.stepName}</strong><small>{evidenceStatusLabels[finding.evidenceStatus]} · {finding.confidence}%</small></div>)}</div><Link className="text-action" to={`/work-orders?id=${selected.workOrderId}&audit=${selected.audit.id}`}>查看视频与逐步证据 <ArrowRight size={17} /></Link>
             {review && <div className="latest-review"><span className="section-kicker">最近返工复核</span><strong>{auditDecisionLabels[review.decision]}</strong><p>{review.summary}</p><Link className="text-action" to={`/work-orders?id=${selected.workOrderId}&audit=${review.id}`}>查看返工证据 <ArrowRight size={17} /></Link></div>}
           </section>
           <section className="decision-panel"><span className="section-kicker">处置操作</span>
@@ -155,7 +155,7 @@ export function ExceptionsPage() {
             {review && <div className="rework-result-entry"><div><span className="section-kicker">最近返工复核</span><strong>{auditDecisionLabels[review.decision]}</strong><small>{reviewVideo?.filename ?? '返工视频'} · {review.summary}</small></div><Link className="primary-action" to={`/work-orders?id=${selected.workOrderId}&audit=${review.id}`}>查看复核结果 <ArrowRight size={17} /></Link></div>}
             {selected.reworkTask && <div className="rework-history"><div className="rework-history__heading"><span className="section-kicker">返工视频记录</span><strong>{reworkVideos.length} 个</strong></div>{reworkVideos.length === 0 ? <p className="rework-history__empty">尚未提交返工视频。</p> : <ol>{reworkVideos.map((video, index) => <li key={video.id}><div><strong>{video.filename}</strong><span>{index === 0 && selected.status === 'REWORK_SUBMITTED' ? '待复核' : '已保存'} · {formatVideoTime(video.createdAt)}</span></div><a href={videoContentUrl(selected.workOrderId, video.id)} rel="noreferrer" target="_blank">查看视频</a></li>)}</ol>}</div>}
           </section>
-        </main>
+        </div>
       </div>}
     </div>
   )
