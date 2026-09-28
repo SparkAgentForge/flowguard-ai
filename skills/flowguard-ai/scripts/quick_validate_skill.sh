@@ -35,7 +35,11 @@ for required_file in \
   "$skill_dir/references/deepstream-integration.md" \
   "$skill_dir/references/step5-rustfs-contract.md" \
   "$skill_dir/references/deployment-runbook.md" \
-  "$skill_dir/references/acceptance-matrix.md"; do
+  "$skill_dir/references/acceptance-matrix.md" \
+  "$skill_dir/references/api-catalog.md" \
+  "$skill_dir/references/verification.md" \
+  "$skill_dir/SKILL_CARD.md" \
+  "$skill_dir/BENCHMARK.md"; do
   [[ -f "$required_file" ]] || { printf '缺少文件: %s\n' "$required_file" >&2; exit 1; }
 done
 
@@ -43,5 +47,17 @@ done
   printf '%s\n' "server_acceptance.sh 不可执行" >&2
   exit 1
 }
+
+[[ -x "$skill_dir/scripts/scan_skill.sh" ]] || {
+  printf '%s\n' "scan_skill.sh 不可执行" >&2
+  exit 1
+}
+
+[[ -x "$skill_dir/scripts/sign_skill_manifest.sh" ]] || {
+  printf '%s\n' "sign_skill_manifest.sh 不可执行" >&2
+  exit 1
+}
+
+"$skill_dir/scripts/scan_skill.sh"
 
 printf '%s\n' "FlowGuard AI skill structure validated."

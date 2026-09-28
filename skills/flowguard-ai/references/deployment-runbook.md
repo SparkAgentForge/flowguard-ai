@@ -27,6 +27,7 @@ The FlowGuard Compose stack contains:
 
 - `api` (default port 8000);
 - `web` (default port 5173);
+- `agent-web` (default port 5174, standalone AI result pages);
 - `postgres` (loopback port 5432);
 - `rustfs` (S3 port 9000 and loopback console port 9001);
 - `rustfs-permissions` (one-shot volume permission setup).
@@ -55,4 +56,3 @@ and generated reports where the API permits it. At the end, delete only those
 test artifacts and temporary directories. Keep user data, PostgreSQL data, and
 RustFS data volumes. Report cleanup failures instead of widening the deletion
 scope.
-

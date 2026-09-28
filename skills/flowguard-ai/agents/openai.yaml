@@ -1,6 +1,6 @@
 interface:
   display_name: "FlowGuard AI"
-  short_description: "Build and accept the FlowGuard AI workflow"
-  default_prompt: "Use $flowguard-ai to deploy and verify the complete FlowGuard SOP audit workflow."
+  short_description: "Audit an uploaded video against an SOP with FlowGuard"
+  default_prompt: "Use $flowguard-ai to check this uploaded video against the applicable SOP and return the evidence-backed result."
 policy:
   allow_implicit_invocation: true

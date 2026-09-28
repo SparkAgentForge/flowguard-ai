@@ -24,6 +24,7 @@ docker compose up --build
 访问：
 
 - Web 工作台：`http://localhost:5173`
+- AI 结果展示页：`http://localhost:5174`
 - API：`http://localhost:8000`
 - OpenAPI：`http://localhost:8000/api/docs`
 - 接口文档：[API.md](docs/API.md)
@@ -63,6 +64,20 @@ npm ci
 npm run dev
 ```
 
+展示型 Agent UI：
+
+```bash
+cd apps/agent-web
+npm ci
+npm run dev
+```
+
+展示页使用独立 URL，不带管理工作台导航。AI 根据审计结果返回
+`FLOWGUARD_AGENT_WEB_URL/audit/{work_order_id}/{audit_id}`、
+`/exception/{exception_id}`、`/sop/{version_id}` 或
+`/report/{work_order_id}`。默认不启用鉴权；如需在异常页执行确认和返工操作，
+构建展示前端时设置 `VITE_AGENT_REVIEWER_ID`。
+
 ## 验收命令
 
 ```bash
@@ -94,6 +109,7 @@ python scripts/integration_smoke.py
 ```text
 apps/api/       FastAPI、SQLAlchemy、Alembic、推理和业务闭环
 apps/web/       React + TypeScript 工业质量工作台
+apps/agent-web/ React + TypeScript 独立结果展示前端
 docs/           需求、检测场景和技术架构
 compose.yaml    API、Web、PostgreSQL、RustFS 本地部署
 scripts/        集成冒烟检查

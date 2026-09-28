@@ -61,6 +61,18 @@ services:
       api:
         condition: service_healthy
 
+  agent-web:
+    build:
+      context: ./apps/agent-web
+      args:
+        VITE_AGENT_API_BASE_URL: ${VITE_AGENT_API_BASE_URL:-/api/v1}
+        VITE_AGENT_REVIEWER_ID: ${VITE_AGENT_REVIEWER_ID:-}
+    ports:
+      - "${FLOWGUARD_AGENT_WEB_PORT:-5174}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
   postgres:
     image: postgres:17-alpine
     environment:
