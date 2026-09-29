@@ -12,9 +12,47 @@ FlowGuard AI 是面向固定装配工位的质量审计系统：把已发布的 
 
 系统只在已发布 SOP 上执行检测；低置信度或遮挡画面进入人工复核，不自动认定操作员责任。
 
+## 通过 Skill 使用（推荐）
+
+如果希望直接在 AI 工具中上传视频并发起 SOP 审计，先安装 FlowGuard Skill。
+安装环境需具备 Node.js/npm（提供 `npx`）、Git，并能够访问 npm 和 GitHub。
+在准备使用 AI 工具的工作目录中执行，无需预先手动克隆 FlowGuard 项目：
+
+```bash
+npx skills add SparkAgentForge/flowguard-ai --skill flowguard-ai
+```
+
+按安装提示选择使用的 AI 工具和安装方式。默认安装到当前项目；需要跨项目使用时，
+可以改用用户级安装：
+
+```bash
+npx skills add SparkAgentForge/flowguard-ai --skill flowguard-ai -g
+```
+
+安装后在所选 AI 工具中开启新会话，上传操作手册和视频，例如：
+
+> 使用 flowguard-ai 检测这个视频是否符合操作手册。先检查当前环境中的 FlowGuard
+> 服务；如果没有，请下载并启动项目。生成的 SOP 先交给我确认，再发布并执行审计，
+> 最后返回结果页面链接。
+
+Skill 会指导 AI 检查服务、准备运行环境、选择已发布 SOP、提交视频审计，并返回
+证据和结果页面。已有可用服务时，直接告诉 AI 其 API 地址和要使用的 SOP 即可。
+候选 SOP 必须经过人工确认才能发布；审计处理中会查询已有记录，不重复提交推理。
+
+`npx` 命令只安装 Skill 操作说明和配套脚本，FlowGuard 服务在后续任务中另行部署。
+使用 Docker 部署时，运行服务的机器需已安装 Docker 与 Docker Compose；PostgreSQL、
+RustFS 和前后端由 Compose 启动，FFmpeg/ffprobe 已包含在 API 镜像中。
+真实视频分析还需在项目 `.env` 中配置 Step 5，例如设置
+`FLOWGUARD_INFERENCE_PROVIDER=stepfun` 和 `FLOWGUARD_STEPFUN_API_KEY`；
+默认 Mock 仅用于流程演示。缺少系统依赖或模型配置时，AI 会列出缺失项，
+不会擅自安装系统软件。远程部署需明确提供目标服务器及访问方式。
+
+详细流程见 [Skill 操作手册](skills/flowguard-ai/SKILL.md)，接口调用见
+[Skill API 接口表](skills/flowguard-ai/references/api-catalog.md)。
+
 ## 快速启动
 
-复制配置并启动完整容器环境：
+如需手动部署服务，在项目根目录复制配置并启动完整容器环境：
 
 ```bash
 cp .env.example .env
@@ -118,6 +156,7 @@ apps/agent-web/ React + TypeScript 独立结果展示前端
 docs/           需求、检测场景和技术架构
 compose.yaml    API、Web、PostgreSQL、RustFS 本地部署
 scripts/        集成冒烟检查
+skills/flowguard-ai/ AI 工具使用的 Skill、接口操作手册和验收脚本
 ```
 
 API 内部按依赖方向分层：`application.py` 负责应用装配，`core/` 定义 AI 与对象存储契约，`infrastructure/` 提供数据库、RustFS、Step 5、DeepStream 和 Mock 的具体适配器，`services/` 只编排业务规则，`routes/` 只负责 HTTP 接口。
