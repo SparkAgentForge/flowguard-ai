@@ -41,8 +41,10 @@ through recorded audit metadata.
 
 - `FLOWGUARD_OBJECT_STORAGE_ENDPOINT` is the API container's internal RustFS
   endpoint used for writes.
-- `FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` is used for browser-facing
-  presigned previews, not Step 5 analysis.
+- `FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` is optional for consumers that
+  explicitly request presigned URLs. Browser videos and evidence clips stream
+  through the existing API content endpoints with byte-range support, so they
+  do not require a public RustFS port. Step 5 never uses this endpoint.
 
 Step 5 needs no route back to RustFS. A private RustFS endpoint is sufficient
 when the API can write objects there. Avoid logging request bodies because

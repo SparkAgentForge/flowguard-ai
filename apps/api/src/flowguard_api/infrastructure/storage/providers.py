@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import BinaryIO
 
 
 class LocalFileStorage:
@@ -12,6 +13,14 @@ class LocalFileStorage:
 
     def get(self, key: str) -> bytes:
         return self._resolve(key).read_bytes()
+
+    def size(self, key: str) -> int:
+        return self._resolve(key).stat().st_size
+
+    def open_range(self, key: str, start: int, end: int) -> BinaryIO:
+        stream = self._resolve(key).open("rb")
+        stream.seek(start)
+        return stream
 
     def exists(self, key: str) -> bool:
         return self._resolve(key).is_file()
@@ -93,7 +102,21 @@ class S3FileStorage:
 
     def get(self, key: str) -> bytes:
         self._ensure_bucket()
-        return self._client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+        body = self._client.get_object(Bucket=self.bucket, Key=key)["Body"]
+        try:
+            return body.read()
+        finally:
+            body.close()
+
+    def size(self, key: str) -> int:
+        self._ensure_bucket()
+        return self._client.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
+
+    def open_range(self, key: str, start: int, end: int) -> BinaryIO:
+        self._ensure_bucket()
+        return self._client.get_object(
+            Bucket=self.bucket, Key=key, Range=f"bytes={start}-{end}"
+        )["Body"]
 
     def exists(self, key: str) -> bool:
         self._ensure_bucket()

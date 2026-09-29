@@ -45,10 +45,11 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
-def isolate_test_settings(monkeypatch: pytest.MonkeyPatch):
+def isolate_test_settings(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("FLOWGUARD_INFERENCE_PROVIDER", "mock")
     monkeypatch.setenv("FLOWGUARD_SOP_EXTRACTOR_PROVIDER", "rule_based")
     monkeypatch.setenv("FLOWGUARD_OBJECT_STORAGE_ENDPOINT", "")
+    monkeypatch.setenv("FLOWGUARD_UPLOAD_DIR", str(tmp_path / "uploads"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

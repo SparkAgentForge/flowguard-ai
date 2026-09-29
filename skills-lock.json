@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "flowguard-ai": {
+      "source": "./skills/flowguard-ai",
+      "sourceType": "local",
+      "computedHash": "6b3744cc32e242d0ab89652ad19996695bb83b2b2c6d64744c99c77ac5cc545a"
+    }
+  }
+}

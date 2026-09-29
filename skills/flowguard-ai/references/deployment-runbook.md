@@ -46,6 +46,19 @@ API environment rather than adding FlowGuard rules to its container.
 7. Record provider, model, image tags, endpoint names, and failures without
    recording credentials.
 
+Health alone does not verify playback: request a stored video's content with
+`Range: bytes=0-1023` and require a `206` response and `Content-Range`. The
+browser should reach only the API, not a private/public RustFS redirect.
+Verify FFmpeg inside the actual API image, including custom deployment
+Dockerfiles. A host binary does not make it available inside the container.
+
+Use `scripts/acceptance_workflow.py` from the project checkout only against an
+explicitly isolated test API/database/bucket. Mock mode checks state branches;
+real mode preserves the observed model decision. Neither health checks nor
+Mock PASS results establish real-world recognition accuracy. If a long model
+call exceeds the client/proxy timeout, preserve its audit ID and poll instead
+of submitting another inference request.
+
 Do not use `git reset --hard`, broad recursive deletion, or volume deletion.
 Do not stop an existing service after testing unless the user explicitly asks.
 

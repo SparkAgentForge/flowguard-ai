@@ -3,8 +3,8 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import RedirectResponse, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -26,6 +26,7 @@ from flowguard_api.models import (
     WorkOrderStatus,
     utc_now,
 )
+from flowguard_api.routes.media import media_response
 from flowguard_api.schemas import (
     ReviewRequestRead,
     ReviewRequestResolve,
@@ -101,6 +102,7 @@ def list_videos(work_order_id: str, session: SessionDependency) -> list[VideoAss
 def video_content(
     work_order_id: str,
     video_id: str,
+    request: Request,
     session: SessionDependency,
     storage: StorageDependency,
 ) -> Response:
@@ -116,10 +118,7 @@ def video_content(
         preview_key = ensure_browser_preview(storage, video)
     except VideoPreviewError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    try:
-        return RedirectResponse(storage.get_url(preview_key, expires_seconds=3600))
-    except RuntimeError:
-        return Response(content=storage.get(preview_key), media_type="video/mp4")
+    return media_response(storage, preview_key, request)
 
 
 @router.post(
@@ -346,6 +345,7 @@ def evidence_clip(
     work_order_id: str,
     audit_id: str,
     step_ref: str,
+    request: Request,
     session: SessionDependency,
     storage: StorageDependency,
     kind: str = Query(default="confirmed", pattern="^(confirmed|candidate)$"),
@@ -383,13 +383,7 @@ def evidence_clip(
     key = evidence_clip_key(audit.raw_response or {}, finding.sop_step_id, kind)
     if not key:
         raise HTTPException(status_code=404, detail="该步骤没有可播放的证据片段")
-    try:
-        return RedirectResponse(storage.get_url(key, expires_seconds=3600))
-    except RuntimeError:
-        try:
-            return Response(content=storage.get(key), media_type="video/mp4")
-        except Exception as error:
-            raise HTTPException(status_code=404, detail="证据片段不存在") from error
+    return media_response(storage, key, request)
 
 
 @router.get(

@@ -56,9 +56,19 @@ def seed_order_with_history(session: Session) -> tuple[str, str, dict[str, str]]
     session.add_all([step, order])
     session.flush()
 
+    video = VideoAsset(
+        id="video-delete-001",
+        work_order_id=order.id,
+        filename="assembly.mp4",
+        content_type="video/mp4",
+        sha256="a" * 64,
+        storage_key="videos/delete/assembly.mp4",
+    )
+    session.add(video)
+    session.flush()
     audit = VideoAudit(
         work_order_id=order.id,
-        video_id="video-placeholder",
+        video_id=video.id,
         status=VideoAuditStatus.COMPLETED,
         decision=AuditDecision.VIOLATION,
         provider="stepfun",
@@ -92,15 +102,7 @@ def seed_order_with_history(session: Session) -> tuple[str, str, dict[str, str]]
     )
     session.add(task)
     session.flush()
-    video = VideoAsset(
-        id="video-delete-001",
-        work_order_id=order.id,
-        rework_task_id=task.id,
-        filename="assembly.mp4",
-        content_type="video/mp4",
-        sha256="a" * 64,
-        storage_key="videos/delete/assembly.mp4",
-    )
+    video.rework_task_id = task.id
     rework_video = VideoAsset(
         id="video-delete-002",
         work_order_id=order.id,
@@ -308,7 +310,9 @@ def test_delete_work_order_storage_failure_preserves_record_for_retry(
     first = client.request("DELETE", f"/api/v1/work-orders/{work_order_id}", json=request)
 
     assert first.status_code == 503
-    assert "请重试" in first.json()["detail"]
+    assert "重试" in first.json()["detail"]
+    assert first.json()["code"] == "SERVICE_UNAVAILABLE"
+    assert "RustFS unavailable" not in first.text
     assert session.get(WorkOrder, work_order_id) is not None
 
     storage.fail_key = None

@@ -21,12 +21,17 @@ Run these commands from the repository root and replace this section only
 when the outputs are available:
 
 ```text
-quick_validate_skill.sh       PASS
+quick_validate_skill.sh       PASS (2026-09-29)
 scan_skill.sh                 PASS
-source/installed parity       PASS
+source/installed parity       PASS (resynced after documentation update)
 shell syntax                  PASS
-server acceptance             NOT RUN: requires a running FlowGuard endpoint
-end-to-end audit              NOT RUN: requires a published SOP and test media
+server acceptance             PASS: provider=stepfun, 30 paths / 34 operations
+Mock end-to-end audit         PASS: SOP -> PASS, VIOLATION, INSUFFICIENT_EVIDENCE -> rework -> report
+real Step 5 audit             COMPLETE: supplied Install_1.MP4, decision preserved as VIOLATION
+real Step 5 rework audit      COMPLETE: supplied Install_3.MP4, decision preserved as VIOLATION
+real media playback           PASS: API streams 206 byte ranges without public RustFS
+PDF Step 5 page extraction    PASS: rendered page stored in RustFS and parsed from image input
+Step Code verification        PASS: read-enabled server/API/Skill routing and idempotent review check
 external SkillSpector scan    NOT RUN: external tool/report not present
 detached signature            NOT RUN: owner signing key not present
 ```

@@ -7,7 +7,7 @@ business services do not need to know which storage product is deployed.
 
 import re
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 SAFE_FILENAME = re.compile(r"[^a-zA-Z0-9._-]+")
 
@@ -16,6 +16,10 @@ class FileStorage(Protocol):
     def put(self, key: str, content: bytes) -> None: ...
 
     def get(self, key: str) -> bytes: ...
+
+    def size(self, key: str) -> int: ...
+
+    def open_range(self, key: str, start: int, end: int) -> BinaryIO: ...
 
     def exists(self, key: str) -> bool: ...
 

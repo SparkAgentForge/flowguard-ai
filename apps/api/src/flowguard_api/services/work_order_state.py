@@ -30,7 +30,11 @@ ALLOWED_TRANSITIONS: dict[WorkOrderStatus, frozenset[WorkOrderStatus]] = {
     WorkOrderStatus.REWORK_ASSIGNED: frozenset({WorkOrderStatus.REWORK_SUBMITTED}),
     WorkOrderStatus.REWORK_SUBMITTED: frozenset({WorkOrderStatus.REWORK_REVIEW}),
     WorkOrderStatus.REWORK_REVIEW: frozenset(
-        {WorkOrderStatus.RELEASED, WorkOrderStatus.REWORK_ASSIGNED}
+        {
+            WorkOrderStatus.RELEASED,
+            WorkOrderStatus.REWORK_ASSIGNED,
+            WorkOrderStatus.REWORK_SUBMITTED,
+        }
     ),
     WorkOrderStatus.RELEASED: frozenset({WorkOrderStatus.ARCHIVED}),
     WorkOrderStatus.ARCHIVED: frozenset(),

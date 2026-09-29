@@ -21,6 +21,7 @@ from flowguard_api.models import (
     ReworkTaskStatus,
     VideoAsset,
     VideoAudit,
+    VideoAuditStatus,
     WorkOrder,
     WorkOrderStatus,
     utc_now,
@@ -266,9 +267,9 @@ def review_rework(
     session: SessionDependency,
     storage: StorageDependency,
 ) -> ReworkReviewResult:
-    task = _get_task(session, task_id)
-    if task.status != ReworkTaskStatus.SUBMITTED:
-        raise HTTPException(status_code=409, detail="当前返工任务状态不允许复核")
+    task = session.scalar(select(ReworkTask).where(ReworkTask.id == task_id).with_for_update())
+    if task is None:
+        raise HTTPException(status_code=404, detail="返工任务不存在")
     video = session.scalar(
         select(VideoAsset).where(
             VideoAsset.id == payload.video_id,
@@ -281,6 +282,18 @@ def review_rework(
     exception = _get_exception(session, task.exception_id)
     if work_order is None:
         raise HTTPException(status_code=409, detail="返工任务关联工作单不存在")
+    existing = session.scalar(
+        select(VideoAudit).options(selectinload(VideoAudit.findings))
+        .where(VideoAudit.video_id == video.id).order_by(VideoAudit.created_at.desc())
+    )
+    if existing is not None and existing.status in {
+        VideoAuditStatus.PROCESSING, VideoAuditStatus.COMPLETED,
+    }:
+        return ReworkReviewResult.model_validate(
+            {"task": task, "audit": existing, "work_order": work_order}
+        )
+    if task.status != ReworkTaskStatus.SUBMITTED:
+        raise HTTPException(status_code=409, detail="当前返工任务状态不允许复核")
     transition_work_order(
         session,
         work_order,
@@ -290,11 +303,42 @@ def review_rework(
     )
     task.status = ReworkTaskStatus.IN_REVIEW
     exception.status = ExceptionStatus.REWORK_REVIEW
+    audit = VideoAudit(
+        work_order_id=work_order.id, video_id=video.id,
+        status=VideoAuditStatus.PROCESSING,
+        decision=AuditDecision.INSUFFICIENT_EVIDENCE,
+        provider=get_settings().inference_provider, model_name=get_settings().stepfun_model,
+        overall_pass=False, summary="返工视频正在进行视觉复核…",
+        raw_response={"status": "PROCESSING"}, execution_trace={}, review_requests=[],
+    )
+    session.add(audit)
+    session.commit()
+    audit_id = audit.id
     try:
-        audit = execute_video_audit(session, work_order, video, storage)
-    except (InvalidVideoAudit, VideoInferenceError) as error:
+        audit = execute_video_audit(session, work_order, video, storage, audit=audit)
+    except Exception as error:
         session.rollback()
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        audit = session.get(VideoAudit, audit_id)
+        task = _get_task(session, task_id)
+        work_order = session.get(WorkOrder, task.work_order_id)
+        exception = _get_exception(session, task.exception_id)
+        expected = isinstance(error, (InvalidVideoAudit, VideoInferenceError))
+        message = str(error) if expected else "返工复核意外失败，请检查服务日志后重试"
+        audit.status = VideoAuditStatus.FAILED
+        audit.summary = message
+        audit.raw_response = {"error": message if expected else "INTERNAL_ERROR"}
+        audit.execution_trace = {}
+        audit.review_requests = []
+        transition_work_order(
+            session, work_order, WorkOrderStatus.REWORK_SUBMITTED, payload.actor_id,
+            "返工复核技术失败，保留视频并允许重试",
+        )
+        task.status = ReworkTaskStatus.SUBMITTED
+        exception.status = ExceptionStatus.REWORK_SUBMITTED
+        session.commit()
+        if expected:
+            raise HTTPException(status_code=422, detail=message) from error
+        raise
 
     task.reviewed_by = payload.actor_id
     task.review_notes = payload.notes
