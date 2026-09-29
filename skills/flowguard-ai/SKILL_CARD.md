@@ -45,7 +45,7 @@ starting an expensive inference call.
 | --- | --- | --- |
 | Cataloged | `agents/openai.yaml`, `references/api-catalog.md` | Product catalog or registry record |
 | Scanned | `scripts/quick_validate_skill.sh`, `scripts/scan_skill.sh` | SkillSpector/security scan report |
-| Evaluated | `BENCHMARK.md`, `references/acceptance-matrix.md` | Server acceptance run and benchmark artifacts |
+| Evaluated | `references/acceptance-matrix.md` | Runtime acceptance results and supporting evidence |
 | Signed | `scripts/sign_skill_manifest.sh` | Detached `skill.oms.sig` made with owner key |
 | Documented | This card, `SKILL.md`, reference manuals | User-facing release notes or trust record |
 

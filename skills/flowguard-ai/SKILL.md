@@ -142,7 +142,7 @@ release contract:
 
 `Cataloged + Scanned + Evaluated + Signed + Documented`.
 
-The repository contains the catalog, local scan, benchmark record, Skill Card,
+The repository contains the catalog, local scan, acceptance matrix, Skill Card,
 and a detached-signature workflow. Do not claim the Skill is fully verified
 unless an external scan report and an owner-controlled signature are also
 present. A missing external artifact is a reported gap, not a reason to invent
@@ -156,8 +156,7 @@ an attestation.
   manual when selecting or explaining a FlowGuard interface.
 - Read [verification.md](references/verification.md) when packaging, scanning,
   evaluating, signing, or declaring the Skill verified.
-- Read [SKILL_CARD.md](SKILL_CARD.md) for the user-facing trust record and
-  [BENCHMARK.md](BENCHMARK.md) for the latest local evaluation record.
+- Read [SKILL_CARD.md](SKILL_CARD.md) for the user-facing trust record.
 
 - Read [project-scope.md](references/project-scope.md) for the open-source
   project scope, supported deployment assumptions, and safety boundaries.

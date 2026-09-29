@@ -38,8 +38,7 @@ for required_file in \
   "$skill_dir/references/acceptance-matrix.md" \
   "$skill_dir/references/api-catalog.md" \
   "$skill_dir/references/verification.md" \
-  "$skill_dir/SKILL_CARD.md" \
-  "$skill_dir/BENCHMARK.md"; do
+  "$skill_dir/SKILL_CARD.md"; do
   [[ -f "$required_file" ]] || { printf '缺少文件: %s\n' "$required_file" >&2; exit 1; }
 done
 

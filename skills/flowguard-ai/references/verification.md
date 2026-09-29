@@ -23,8 +23,8 @@ SkillSpector or equivalent security scan report.
 
 ## 3. Evaluated
 
-Use `BENCHMARK.md` for routing cases and `references/acceptance-matrix.md` for
-the runtime business flow. A runtime evaluation must preserve request paths,
+Use the routing rules in `SKILL.md` and `references/acceptance-matrix.md` to
+evaluate the runtime business flow. A runtime evaluation must preserve request paths,
 provider, resource IDs, status transitions, failure reason, and cleanup result.
 Do not report `PASS` from a provider response without FlowGuard evidence gates.
 
@@ -44,7 +44,7 @@ signature verifier is available, report the gate as pending.
 ## 5. Documented
 
 Document the purpose, accepted inputs, boundaries, interface table, provider
-contracts, benchmark state, and known verification gaps in `SKILL.md`,
+contracts and known verification gaps in `SKILL.md`,
 `SKILL_CARD.md`, and the linked references. Keep documentation synchronized
 with the actual OpenAPI contract; use `/api/openapi.json` for request fields.
 
