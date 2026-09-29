@@ -23,14 +23,19 @@ docker compose up --build
 
 访问：
 
-- Web 工作台：`http://localhost:5173`
-- AI 结果展示页：`http://localhost:5174`
+- Web 工作台：`http://localhost:8888`
+- AI 结果展示页：`http://localhost:9000`
 - API：`http://localhost:8000`
 - OpenAPI：`http://localhost:8000/api/docs`
 - 接口文档：[API.md](docs/API.md)
-- PostgreSQL：`localhost:5432`
-- RustFS S3 API：`http://localhost:9000`
-- RustFS 控制台：`http://localhost:9001`（仅本机或 SSH 隧道）
+- PostgreSQL：`localhost:15432`（仅本机或 SSH 隧道）
+- RustFS S3 API：`http://localhost:19000`（仅本机或 SSH 隧道）
+- RustFS 控制台：`http://localhost:19001`（仅本机或 SSH 隧道）
+
+上述地址使用宿主机端口。容器内 PostgreSQL 仍为 `postgres:5432`，RustFS
+仍为 `rustfs:9000`，两个前端容器仍监听 `80`。云节点公网端口与这些端口的
+对应关系见文末。Vite 开发和预览默认使用 `8888` / `9000`，与 Compose 前端
+不能同时占用相同端口；端口冲突时明确报错，不自动切换端口。
 
 API 容器启动时会自动执行 `alembic upgrade head`。默认使用 Mock 推理，不需要 GPU 或 StepFun 密钥。
 
@@ -82,7 +87,7 @@ npm run dev
 
 ```bash
 cd apps/api
-export FLOWGUARD_TEST_DATABASE_URL=postgresql+pg8000://flowguard:flowguard@localhost:5432/flowguard_test
+export FLOWGUARD_TEST_DATABASE_URL=postgresql+pg8000://flowguard:flowguard@localhost:15432/flowguard_test
 python -m pytest -q
 python -m ruff check src tests
 
@@ -123,20 +128,40 @@ FlowGuard AI 用于质量辅助和流程审计，不替代最终安全认证；�
 
 项目采用 Apache License 2.0。
 
-## DGX Spark 公网访问
+## 云节点端口与公网访问
 
-Spark 云节点只将节点内的 `9000` 端口映射到公网业务端口，节点编号为 `NN` 时公网端口为 `90NN`。RustFS 的 S3 API 监听 `0.0.0.0:9000`，因此外部文件访问地址为：
+云节点网关把两个公网业务端口分别转发到节点的 `8888` 和 `9000`。
+以分配的公网端口 `8021` / `9021` 为例：
 
-```text
-http://<组委会提供的公网 IP>:90NN
-```
+| 服务 | 浏览器公网入口 | 节点宿主机监听 | 容器内端口 |
+| --- | --- | --- | --- |
+| 管理工作台 | `http://<公网IP>:8021` | `0.0.0.0:8888` | `web:80` |
+| AI 结果展示页 | `http://<公网IP>:9021` | `0.0.0.0:9000` | `agent-web:80` |
+| PostgreSQL | 无，使用 SSH 隧道 | `127.0.0.1:15432` | `postgres:5432` |
+| RustFS S3 API | 无，使用 SSH 隧道 | `127.0.0.1:19000` | `rustfs:9000` |
+| RustFS 控制台 | 无，使用 SSH 隧道 | `127.0.0.1:19001` | `rustfs:9001` |
 
-RustFS 控制台 `9001` 没有公网映射，配置为节点本机回环地址；需要管理控制台时通过 SSH 隧道访问：
+`8021` 和 `9021` 是网关端口，不是 Compose 应绑定的宿主机端口。
+`FLOWGUARD_WEB_PORT=8888`、`FLOWGUARD_AGENT_WEB_PORT=9000` 控制 Compose
+的宿主机绑定；两个前端通过同源 `/api` 代理访问 `api:8000`，浏览器无需访问
+后端的独立端口。
+
+本地 `.env.example` 中的结果地址为 `http://localhost:9000`。远程部署时将
+`FLOWGUARD_AGENT_WEB_URL` 改为 `http://<实际公网IP>:9021`，供 Skill 返回可访问的
+结果链接；该变量不改变服务监听端口。其他节点使用其实际分配的公网端口。
+
+需要从本机连接数据库或管理对象存储时，建立 SSH 隧道：
 
 ```bash
-ssh -p <SSH端口> -L 9001:localhost:9001 Developer@<公网 IP>
+ssh -p <SSH端口> \
+  -L 15432:127.0.0.1:15432 \
+  -L 19000:127.0.0.1:19000 \
+  -L 19001:127.0.0.1:19001 <用户名>@<公网IP>
 ```
 
-公网 S3 API 必须使用非默认的 `RUSTFS_ACCESS_KEY` 和 `RUSTFS_SECRET_KEY`，不要把控制台或无鉴权的文件管理器直接暴露到公网。
+Step 5 图片使用 Base64 data URL，网页视频和证据由 API 同源流式返回，均无需
+RustFS 公网入口。直接运行后端时，对象存储地址使用 `http://localhost:19000`；
+Compose 自动使用内部地址 `http://rustfs:9000`。`FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT`
+仅用于显式请求预签名链接的调用方，不能填成展示页占用的公网 `9021` 地址。
 
-Step 5 图片通过请求体内的 Base64 data URL 传输，不需要访问 RustFS 的公网地址。`FLOWGUARD_OBJECT_STORAGE_ENDPOINT` 供 API 写入证据；`FLOWGUARD_OBJECT_STORAGE_PUBLIC_ENDPOINT` 只在浏览器通过签名 URL 预览文件时使用，应填写浏览器可访问的地址。
+端口映射不提供鉴权；当前展示前端未实现登录，公网部署须按所在环境要求配置访问控制。
